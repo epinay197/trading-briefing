@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plan de Trading NQ — KVO Levels</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #60a5fa;
+    --green: #4ade80; --red: #f87171; --yellow: #fbbf24;
+    --pink: #f472b6; --gold: #d97706; --white: #e6edf3;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; padding: 16px; }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 22px; color: var(--accent); margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+  .date-line { font-size: 14px; color: var(--yellow); margin-bottom: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; color: var(--accent); margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .card h3 { font-size: 14px; margin: 12px 0 6px; }
+  .bias-label { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 13px; font-weight: 600; margin-left: 8px; }
+  .bias-bullish { background: rgba(74,222,128,0.15); color: var(--green); }
+  .bias-bearish { background: rgba(248,113,113,0.15); color: var(--red); }
+  .bias-neutral { background: rgba(251,191,36,0.15); color: var(--yellow); }
+
+  /* Levels table */
+  .levels-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin: 8px 0; }
+  .level-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; border-left: 3px solid var(--muted); font-size: 13px; }
+  .level-item.pink { border-left-color: var(--pink); }
+  .level-item.red { border-left-color: var(--red); }
+  .level-item.green { border-left-color: var(--green); }
+  .level-item.yellow { border-left-color: var(--yellow); }
+  .level-item.gold { border-left-color: var(--gold); }
+  .level-item.white { border-left-color: var(--white); }
+  .level-item.gray { border-left-color: #6b7280; }
+  .level-name { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .level-price { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* Scenario cards */
+  .scenario { margin: 10px 0; padding: 12px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+  .scenario-bull { background: rgba(74,222,128,0.06); border: 1px solid rgba(74,222,128,0.15); }
+  .scenario-bear { background: rgba(248,113,113,0.06); border: 1px solid rgba(248,113,113,0.15); }
+  .scenario-range { background: rgba(96,165,250,0.06); border: 1px solid rgba(96,165,250,0.15); }
+  .scenario-contra { background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.15); }
+  .scenario-risk { background: rgba(139,148,158,0.06); border: 1px solid rgba(139,148,158,0.15); }
+  .scenario h3 { margin-top: 0; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 600; margin: 0 2px; font-variant-numeric: tabular-nums; }
+  .tag-entry { background: rgba(96,165,250,0.2); color: var(--accent); }
+  .tag-target { background: rgba(74,222,128,0.2); color: var(--green); }
+  .tag-stop { background: rgba(248,113,113,0.2); color: var(--red); }
+  .tag-level { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .arrow { color: var(--muted); margin: 0 2px; }
+
+  .footer { text-align: center; font-size: 11px; color: var(--border); margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .loading { text-align: center; padding: 40px; color: var(--muted); }
+  .error { color: var(--red); text-align: center; padding: 20px; }
+
+  @media (max-width: 600px) {
+    .levels-grid { grid-template-columns: 1fr 1fr; }
+    body { padding: 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Plan de Trading NQ — Niveaux KVO</h1>
+  <div class="subtitle">Approche killpips71 / MyQuantData — Futures Nasdaq-100</div>
+  <div class="date-line" id="dateDisplay"></div>
+
+  <div id="content">
+    <div class="loading" id="loadingMsg">Chargement des niveaux depuis Google Sheets...</div>
+  </div>
+
+  <div class="footer">
+    Source : Google Sheets NQ Monthly &nbsp;|&nbsp; Approche KVO-Levels MyQuantData<br>
+    <span id="genTime"></span>
+  </div>
+</div>
+
+<script>
+const SHEET_ID = '13yrOL6TrLGALO4eRU2Zd9nj7Z1xSqnMv_slSjASuhKw';
+const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
+
+// Level definitions mapping row index to name (rows 2-18 = indices 1-17 in data)
+const LEVEL_MAP = [
+  { key: 'VIX_R1',       label: 'VIX R1',          colorClass: 'pink' },
+  { key: 'VIX_R2',       label: 'VIX R2',          colorClass: 'pink' },
+  { key: 'VIX_S1',       label: 'VIX S1',          colorClass: 'pink' },
+  { key: 'VIX_S2',       label: 'VIX S2',          colorClass: 'pink' },
+  { key: '1DEXP_MAX',    label: '1DExp MAX',       colorClass: 'pink' },
+  { key: '1DEXP_MIN',    label: '1DExp MIN',       colorClass: 'pink' },
+  { key: 'RD0',          label: 'RD0',             colorClass: 'gray' },
+  { key: 'RD1',          label: 'RD1',             colorClass: 'yellow' },
+  { key: 'RD2',          label: 'RD2',             colorClass: 'white' },
+  { key: 'SD0',          label: 'SD0',             colorClass: 'gray' },
+  { key: 'SD1',          label: 'SD1',             colorClass: 'yellow' },
+  { key: 'SD2',          label: 'SD2',             colorClass: 'white' },
+  { key: 'HV',           label: 'HV',             colorClass: 'gold' },
+  { key: 'VAH',          label: 'VAH',             colorClass: 'red' },
+  { key: 'VAL',          label: 'VAL',             colorClass: 'green' },
+  { key: 'RANGE_MAX',    label: 'Range Daily Max', colorClass: 'red' },
+  { key: 'RANGE_MIN',    label: 'Range Daily Min', colorClass: 'green' },
+];
+
+function parseCSV(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+  return lines.map(line => {
+    const cols = [];
+    let inQuote = false, val = '';
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuote = !inQuote; }
+      else if (ch === ',' && !inQuote) { cols.push(val.trim()); val = ''; }
+      else { val += ch; }
+    }
+    cols.push(val.trim());
+    return cols;
+  });
+}
+
+function tag(cls, text) {
+  return `<span class="tag tag-${cls}">${text}</span>`;
+}
+
+function arrow() { return '<span class="arrow">&rarr;</span>'; }
+
+function buildPage(levels) {
+  const L = {};
+  LEVEL_MAP.forEach((m, i) => {
+    L[m.key] = levels[i] ? parseFloat(levels[i]) : null;
+  });
+
+  // Determine bias based on HV position
+  // We don't have spot price from the sheet, so we base bias on RD0 vs SD0 midpoint vs HV
+  const mid = L.RD0 && L.SD0 ? (L.RD0 + L.SD0) / 2 : null;
+  let biasText, biasClass, biasLabel;
+  if (mid && L.HV) {
+    if (mid > L.HV + 50) {
+      biasText = 'Haussier'; biasClass = 'bias-bullish'; biasLabel = 'HAUSSIER';
+    } else if (mid < L.HV - 50) {
+      biasText = 'Baissier'; biasClass = 'bias-bearish'; biasLabel = 'BAISSIER';
+    } else {
+      biasText = 'Neutre'; biasClass = 'bias-neutral'; biasLabel = 'NEUTRE';
+    }
+  } else {
+    biasText = 'Indéterminé'; biasClass = 'bias-neutral'; biasLabel = '—';
+  }
+
+  const fmt = (v) => v != null ? v.toFixed(0) : '—';
+
+  let html = '';
+
+  // ── 1. Bias Card ──
+  html += `<div class="card">
+    <h2>1. Biais du Jour <span class="bias-label ${biasClass}">${biasLabel}</span></h2>
+    <p style="font-size:13px; line-height:1.6; color:var(--muted)">
+      Le niveau pivot central est <strong style="color:var(--gold)">HV (${fmt(L.HV)})</strong>.
+      Le prix au-dessus de HV indique un intérêt acheteur et un support sur les volumes hauts.
+      Le prix en dessous de HV indique une faiblesse technique et un essoufflement du momentum.
+      <br><br>
+      Milieu RD0/SD0 = <strong>${fmt(mid)}</strong> vs HV = <strong>${fmt(L.HV)}</strong>
+      &nbsp;&rarr;&nbsp; Biais <strong>${biasText}</strong>
+    </p>
+  </div>`;
+
+  // ── 2. All Levels ──
+  html += `<div class="card">
+    <h2>2. Niveaux du Jour</h2>
+    <div class="levels-grid">`;
+  LEVEL_MAP.forEach((m, i) => {
+    const val = levels[i] ? parseFloat(levels[i]) : null;
+    html += `<div class="level-item ${m.colorClass}">
+      <span class="level-name">${m.label}</span>
+      <span class="level-price">${val != null ? fmt(val) : '—'}</span>
+    </div>`;
+  });
+  html += `</div></div>`;
+
+  // ── 3. Bullish Scenario ──
+  html += `<div class="card">
+    <h2>3. Scénarios Opérationnels</h2>
+    <div class="scenario scenario-bull">
+      <h3 style="color:var(--green)">&#x1F7E2; Scénario Haussier</h3>
+      <p><strong>Condition :</strong> Prix au-dessus de ${tag('level', 'RD0 ' + fmt(L.RD0))}</p>
+      <p><strong>Entrée :</strong> ${tag('entry', 'Long')} sur cassure au-dessus de ${tag('level', 'RD1 ' + fmt(L.RD1))} ou retest depuis le haut.</p>
+      <p><strong>Objectifs :</strong>
+        ${tag('target', 'RD2 ' + fmt(L.RD2))} ${arrow()}
+        ${tag('target', 'VIX R1 ' + fmt(L.VIX_R1))} ${arrow()}
+        ${tag('target', '1DExp MAX ' + fmt(L['1DEXP_MAX']))} ${arrow()}
+        ${tag('target', 'VAH ' + fmt(L.VAH))} ${arrow()}
+        ${tag('target', 'Range Max ' + fmt(L.RANGE_MAX))}
+      </p>
+      <p><strong>Stop-loss :</strong> ${tag('stop', 'Sous SD0 ' + fmt(L.SD0))} ; étendre à ${tag('stop', 'VIX S1 ' + fmt(L.VIX_S1))} si volatilité sur événements macro.</p>
+      <p><strong>Risque :</strong> 1-2% du range journalier (~200-400 pts) selon le régime de VIX.</p>
+    </div>
+
+    <div class="scenario scenario-bear">
+      <h3 style="color:var(--red)">&#x1F534; Scénario Baissier</h3>
+      <p><strong>Condition :</strong> Prix en dessous de ${tag('level', 'SD0 ' + fmt(L.SD0))}</p>
+      <p><strong>Entrée :</strong> ${tag('entry', 'Short')} sur cassure sous ${tag('level', 'SD1 ' + fmt(L.SD1))} ou retest par le bas.</p>
+      <p><strong>Objectifs :</strong>
+        ${tag('target', 'SD2 ' + fmt(L.SD2))} ${arrow()}
+        ${tag('target', 'VIX S1 ' + fmt(L.VIX_S1))} ${arrow()}
+        ${tag('target', '1DExp MIN ' + fmt(L['1DEXP_MIN']))} ${arrow()}
+        ${tag('target', 'VAL ' + fmt(L.VAL))} ${arrow()}
+        ${tag('target', 'Range Min ' + fmt(L.RANGE_MIN))}
+      </p>
+      <p><strong>Stop-loss :</strong> ${tag('stop', 'Au-dessus RD0 ' + fmt(L.RD0))} ; étendre à ${tag('stop', 'VIX R1 ' + fmt(L.VIX_R1))} en cas d\'escalade.</p>
+      <p><strong>Risque :</strong> Même dimensionnement 1-2% du range journalier.</p>
+    </div>
+
+    <div class="scenario scenario-range">
+      <h3 style="color:var(--accent)">&#x1F7E6; Scénario de Range</h3>
+      <p><strong>Zone :</strong> Latéralisation entre ${tag('level', 'RD0/RD1 ' + fmt(L.RD0) + '-' + fmt(L.RD1))} et ${tag('level', 'SD0/SD1 ' + fmt(L.SD0) + '-' + fmt(L.SD1))}</p>
+      <p><strong>Stratégie :</strong> Achats sur ${tag('entry', 'SD0/SD1')} avec objectif RD0 ; ventes sur ${tag('entry', 'RD0/RD1')} avec objectif SD0.</p>
+      <p><strong>Stops :</strong> Serrés (~50-100 pts hors de la zone) ; taille réduite sur volatilité de headlines.</p>
+    </div>
+
+    <div class="scenario scenario-contra">
+      <h3 style="color:var(--yellow)">&#x21A9;&#xFE0F; Opérations Contrariennes</h3>
+      <p><strong>Echec à</strong> ${tag('level', 'RD1 ' + fmt(L.RD1))} ou ${tag('level', 'VIX R1 ' + fmt(L.VIX_R1))} :
+        ${tag('entry', 'Short')} avec stop au-dessus de ${tag('stop', 'VIX R2 ' + fmt(L.VIX_R2))}, objectif SD0/SD1.</p>
+      <p><strong>Echec à</strong> ${tag('level', 'SD1 ' + fmt(L.SD1))} ou ${tag('level', 'VIX S1 ' + fmt(L.VIX_S1))} :
+        ${tag('entry', 'Long')} avec stop sous ${tag('stop', 'VIX S2 ' + fmt(L.VIX_S2))}, objectif RD0/RD1.</p>
+      <p><strong>Rejet à</strong> ${tag('level', 'VAH ' + fmt(L.VAH))} ou ${tag('level', '1DExp MAX ' + fmt(L['1DEXP_MAX']))} :
+        ${tag('entry', 'Short')} ;
+        Rejet à ${tag('level', 'VAL ' + fmt(L.VAL))} : ${tag('entry', 'Long')}.</p>
+      <p style="color:var(--muted); font-size:12px;">Stops et objectifs ajustés selon le niveau de VIX actuel.</p>
+    </div>
+
+    <div class="scenario scenario-risk">
+      <h3 style="color:var(--muted)">&#x26A0;&#xFE0F; Risque &amp; Niveaux Extrêmes</h3>
+      <p><strong>Enveloppe du jour :</strong> ${tag('level', fmt(L.RANGE_MIN))} — ${tag('level', fmt(L.RANGE_MAX))}
+        (amplitude = <strong>${L.RANGE_MAX && L.RANGE_MIN ? fmt(L.RANGE_MAX - L.RANGE_MIN) : '—'} pts</strong>)</p>
+      <p><strong>Gestion :</strong> Risque max 0.5-1% du capital par trade. Trail stop au breakeven sur cassure RD1/SD1 confirmée.</p>
+      <p><strong>Surveiller :</strong> Annonces macro, données économiques, mouvements du VIX, catalyseurs géopolitiques.</p>
+    </div>
+  </div>`;
+
+  return html;
+}
+
+async function loadLevels() {
+  const loading = document.getElementById('loadingMsg');
+  const content = document.getElementById('content');
+
+  try {
+    const resp = await fetch(CSV_URL);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    const rows = parseCSV(text);
+
+    // Rows 2-18 = indices 1-17 (0-indexed), column A = Price
+    const levels = [];
+    for (let i = 1; i <= 17 && i < rows.length; i++) {
+      levels.push(rows[i][0]); // column A = Price
+    }
+
+    content.innerHTML = buildPage(levels);
+  } catch (err) {
+    content.innerHTML = `<div class="card">
+      <div class="error">Erreur de chargement : ${err.message}<br>
+      <small style="color:var(--muted)">Vérifiez que le Google Sheet est accessible publiquement.</small></div>
+    </div>`;
+  }
+}
+
+// Set date
+const now = new Date();
+const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+document.getElementById('dateDisplay').textContent = now.toLocaleDateString('fr-FR', opts);
+document.getElementById('genTime').textContent = 'Généré le ' + now.toLocaleString('fr-FR');
+
+loadLevels();
+
+// Auto-refresh every 5 minutes
+setInterval(loadLevels, 5 * 60 * 1000);
+</script>
+</body>
+</html>
