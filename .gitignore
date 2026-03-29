@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Local briefing output (CI writes to docs/ instead)
+briefing_*.html
+briefing_latest.html
+
+# Temp files
+*.tmp
+check_syntax.py
+syntax_out.txt
+syntax_err.txt
+
+# Environment / secrets
+.env
+*.env

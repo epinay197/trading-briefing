@@ -1,0 +1,83 @@
+name: Daily Trading Briefing
+
+on:
+  # 7:55 AM ET — noon UTC covers both EDT (UTC-4) and EST (UTC-5) pre-market windows
+  # EDT: 12:00 UTC = 8:00 AM ET  |  EST: 12:00 UTC = 7:00 AM ET  — both fine pre-open
+  schedule:
+    - cron: '55 11 * * 1-5'   # primary: 7:55 AM EDT (summer)
+    - cron: '55 12 * * 1-5'   # fallback: 7:55 AM EST (winter)
+
+  # Manual trigger from GitHub UI (Actions tab → Run workflow)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Generate briefing even on market-closed days (--force)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: write    # needed to commit docs/ back to the repo
+
+jobs:
+  generate-briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # ── Skip if this exact calendar date already has a briefing ──────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check for duplicate run
+        id: dupe
+        run: |
+          DATE=$(TZ=America/New_York date +%Y-%m-%d)
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          if [ -f "docs/briefing_${DATE}.html" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Briefing for $DATE already exists — skipping second cron run"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ── Python setup ─────────────────────────────────────────────────────────
+      - name: Set up Python
+        if: steps.dupe.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        if: steps.dupe.outputs.skip != 'true'
+        run: pip install -r requirements.txt
+
+      # ── Generate briefing ────────────────────────────────────────────────────
+      - name: Generate briefing
+        if: steps.dupe.outputs.skip != 'true'
+        env:
+          MENTHORQ_EMAIL:    ${{ secrets.MENTHORQ_EMAIL }}
+          MENTHORQ_PASSWORD: ${{ secrets.MENTHORQ_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NTFY_TOPIC:        ${{ secrets.NTFY_TOPIC }}
+          PAGES_URL:         https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          # CI=true already set by GitHub Actions — triggers headless mode
+          TRADING_DIR:       ${{ github.workspace }}/docs
+        run: |
+          mkdir -p docs
+          FLAGS=""
+          if [ "${{ inputs.force }}" = "true" ]; then FLAGS="--force"; fi
+          python daily_briefing.py $FLAGS
+
+      # ── Commit & push updated docs/ ──────────────────────────────────────────
+      - name: Commit briefing to docs/
+        if: steps.dupe.outputs.skip != 'true'
+        run: |
+          git config user.name  "Trading Briefing Bot"
+          git config user.email "briefing-bot@noreply"
+          git add docs/
+          git diff --staged --quiet && echo "Nothing to commit" || \
+            git commit -m "briefing: ${{ steps.dupe.outputs.date }}" && git push
