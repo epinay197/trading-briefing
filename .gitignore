@@ -7,8 +7,9 @@ venv/
 env/
 
 # Local briefing output (CI writes to docs/ instead)
-briefing_*.html
-briefing_latest.html
+# Root-level only — docs/briefing_*.html must be committed by CI
+/briefing_*.html
+/briefing_latest.html
 
 # Temp files
 *.tmp
