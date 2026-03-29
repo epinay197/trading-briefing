@@ -84,9 +84,9 @@ jobs:
           git diff --staged --quiet && echo "Nothing to commit" || \
             git commit -m "briefing: ${{ steps.dupe.outputs.date }}" && git push
 
-      # ── Enable GitHub Pages (idempotent — safe to run every time) ────────────
+      # ── Enable GitHub Pages (idempotent — always runs, no skip) ─────────────
       - name: Enable GitHub Pages (docs/ on main)
-        if: steps.dupe.outputs.skip != 'true'
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
