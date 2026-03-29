@@ -96,6 +96,8 @@ jobs:
       # ── Deploy docs/ to GitHub Pages via Actions (enables Pages automatically) ─
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true   # auto-enables Pages if not already active
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
