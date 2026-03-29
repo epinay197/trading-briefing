@@ -2,7 +2,7 @@ name: Daily Trading Briefing
 
 on:
   # 7:55 AM ET — noon UTC covers both EDT (UTC-4) and EST (UTC-5) pre-market windows
-  # EDT: 12:00 UTC = 8:00 AM ET  |  EST: 12:00 UTC = 7:00 AM ET  — both fine pre-open
+  # EDT: 11:55 UTC = 7:55 AM ET  |  EST: 12:55 UTC = 7:55 AM ET
   schedule:
     - cron: '55 11 * * 1-5'   # primary: 7:55 AM EDT (summer)
     - cron: '55 12 * * 1-5'   # fallback: 7:55 AM EST (winter)
@@ -17,22 +17,32 @@ on:
         type: boolean
 
 permissions:
-  contents: write    # needed to commit docs/ back to the repo
-  pages:   write     # needed to enable/update GitHub Pages
-  id-token: write    # needed for Pages OIDC deployment
+  contents: write    # commit docs/ back to repo
+  pages:   write     # deploy to GitHub Pages
+  id-token: write    # OIDC token for Pages deployment
+
+# Only one Pages deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   generate-briefing:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
     steps:
-      # ── Skip if this exact calendar date already has a briefing ──────────────
+      # ── Checkout ──────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      # ── Skip if today's briefing already committed (duplicate cron guard) ────
       - name: Check for duplicate run
         id: dupe
         run: |
@@ -40,7 +50,7 @@ jobs:
           echo "date=$DATE" >> $GITHUB_OUTPUT
           if [ -f "docs/briefing_${DATE}.html" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Briefing for $DATE already exists — skipping second cron run"
+            echo "Briefing for $DATE already exists — skipping generation"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
@@ -66,7 +76,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NTFY_TOPIC:        ${{ secrets.NTFY_TOPIC }}
           PAGES_URL:         https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-          # CI=true already set by GitHub Actions — triggers headless mode
           TRADING_DIR:       ${{ github.workspace }}/docs
         run: |
           mkdir -p docs
@@ -74,7 +83,7 @@ jobs:
           if [ "${{ inputs.force }}" = "true" ]; then FLAGS="--force"; fi
           python daily_briefing.py $FLAGS
 
-      # ── Commit & push updated docs/ ──────────────────────────────────────────
+      # ── Commit briefing HTML to docs/ (git history + branch-deploy fallback) ─
       - name: Commit briefing to docs/
         if: steps.dupe.outputs.skip != 'true'
         run: |
@@ -84,28 +93,15 @@ jobs:
           git diff --staged --quiet && echo "Nothing to commit" || \
             git commit -m "briefing: ${{ steps.dupe.outputs.date }}" && git push
 
-      # ── Enable GitHub Pages (idempotent — always runs, no skip) ─────────────
-      - name: Enable GitHub Pages (docs/ on main)
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Try to enable Pages (POST = first time, PUT = update existing)
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/${{ github.repository }}/pages \
-            -d '{"source":{"branch":"main","path":"/docs"}}')
-          echo "POST status: $STATUS"
-          if [ "$STATUS" = "409" ] || [ "$STATUS" = "422" ]; then
-            # Already exists — update source
-            curl -s -X PUT \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/repos/${{ github.repository }}/pages \
-              -d '{"source":{"branch":"main","path":"/docs"}}' | \
-              python3 -c "import sys,json; d=json.load(sys.stdin); print('Pages URL:', d.get('html_url','?'))" 2>/dev/null || true
-          fi
+      # ── Deploy docs/ to GitHub Pages via Actions (enables Pages automatically) ─
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
