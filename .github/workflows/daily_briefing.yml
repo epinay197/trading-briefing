@@ -1,13 +1,14 @@
 name: Daily Trading Briefing
 
 on:
-  # 7:55 AM ET — noon UTC covers both EDT (UTC-4) and EST (UTC-5) pre-market windows
-  # EDT: 11:55 UTC = 7:55 AM ET  |  EST: 12:55 UTC = 7:55 AM ET
   schedule:
-    - cron: '55 11 * * 1-5'   # primary: 7:55 AM EDT (summer)
-    - cron: '55 12 * * 1-5'   # fallback: 7:55 AM EST (winter)
+    # London session — 3:30 AM ET (covers EDT UTC-4 and EST UTC-5)
+    - cron: '30 7 * * 1-5'    # 3:30 AM EDT (summer, UTC-4)
+    - cron: '30 8 * * 1-5'    # 3:30 AM EST (winter, UTC-5)
+    # US pre-market — 7:55 AM ET (covers EDT UTC-4 and EST UTC-5)
+    - cron: '55 11 * * 1-5'   # 7:55 AM EDT (summer, UTC-4)
+    - cron: '55 12 * * 1-5'   # 7:55 AM EST (winter, UTC-5)
 
-  # Manual trigger from GitHub UI (Actions tab → Run workflow)
   workflow_dispatch:
     inputs:
       force:
@@ -15,6 +16,15 @@ on:
         required: false
         default: 'false'
         type: boolean
+      session:
+        description: 'Session to generate'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - us
+          - london
 
 permissions:
   contents: write    # commit docs/ back to repo
@@ -42,17 +52,45 @@ jobs:
         with:
           fetch-depth: 1
 
-      # ── Skip if today's briefing already committed (duplicate cron guard) ────
-      - name: Check for duplicate run
-        id: dupe
+      # ── Detect session (london = before 6 AM ET, us = after) ─────────────────
+      - name: Detect session
+        id: session
         run: |
           DATE=$(TZ=America/New_York date +%Y-%m-%d)
           echo "date=$DATE" >> $GITHUB_OUTPUT
-          if [ -f "docs/briefing_${DATE}.html" ]; then
+
+          # Manual override via workflow_dispatch input
+          MANUAL="${{ inputs.session }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$MANUAL" != "auto" ] && [ -n "$MANUAL" ]; then
+            echo "session=$MANUAL" >> $GITHUB_OUTPUT
+            echo "Manually selected session: $MANUAL"
+          else
+            # Auto-detect: before 6 AM ET = London, 6 AM+ = US
+            TOTAL=$(TZ=America/New_York date +"%-H * 60 + %-M" | bc)
+            if [ "$TOTAL" -lt 360 ]; then
+              echo "session=london" >> $GITHUB_OUTPUT
+              echo "Auto-detected: London session ($(TZ=America/New_York date +%H:%M) ET)"
+            else
+              echo "session=us" >> $GITHUB_OUTPUT
+              echo "Auto-detected: US session ($(TZ=America/New_York date +%H:%M) ET)"
+            fi
+          fi
+
+      # ── Skip if this session's briefing already exists (duplicate cron guard) ─
+      - name: Check for duplicate run
+        id: dupe
+        run: |
+          DATE="${{ steps.session.outputs.date }}"
+          SESSION="${{ steps.session.outputs.session }}"
+          SUFFIX=""
+          [ "$SESSION" = "london" ] && SUFFIX="_london"
+          FILE="docs/briefing_${DATE}${SUFFIX}.html"
+          if [ -f "$FILE" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Briefing for $DATE already exists — skipping generation"
+            echo "Briefing $FILE already exists — skipping"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Will generate: $FILE"
           fi
 
       # ── Python setup ─────────────────────────────────────────────────────────
@@ -79,11 +117,11 @@ jobs:
           TRADING_DIR:       ${{ github.workspace }}/docs
         run: |
           mkdir -p docs
-          FLAGS=""
-          if [ "${{ inputs.force }}" = "true" ]; then FLAGS="--force"; fi
+          FLAGS="--session ${{ steps.session.outputs.session }}"
+          if [ "${{ inputs.force }}" = "true" ]; then FLAGS="$FLAGS --force"; fi
           python daily_briefing.py $FLAGS
 
-      # ── Commit briefing HTML to docs/ (git history + branch-deploy fallback) ─
+      # ── Commit briefing HTML to docs/ ─────────────────────────────────────────
       - name: Commit briefing to docs/
         if: steps.dupe.outputs.skip != 'true'
         run: |
@@ -91,13 +129,13 @@ jobs:
           git config user.email "briefing-bot@noreply"
           git add docs/
           git diff --staged --quiet && echo "Nothing to commit" || \
-            git commit -m "briefing: ${{ steps.dupe.outputs.date }}" && git push
+            git commit -m "briefing: ${{ steps.session.outputs.date }} (${{ steps.session.outputs.session }})" && git push
 
-      # ── Deploy docs/ to GitHub Pages via Actions (enables Pages automatically) ─
+      # ── Deploy docs/ to GitHub Pages ──────────────────────────────────────────
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
-          enablement: true   # auto-enables Pages if not already active
+          enablement: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
