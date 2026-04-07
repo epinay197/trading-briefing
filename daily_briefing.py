@@ -207,11 +207,12 @@ MENTHORQ_EMAIL    = os.environ.get("MENTHORQ_EMAIL", "")
 MENTHORQ_PASSWORD = os.environ.get("MENTHORQ_PASSWORD", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
-# Session: "london" (3:30 AM ET) or "us" (7:55 AM ET)
+# Session: "london" (3:30 AM ET), "us" (7:55 AM ET), or "nyopen" (9:15 AM ET)
 _sidx    = sys.argv.index("--session") + 1 if "--session" in sys.argv else -1
 SESSION  = sys.argv[_sidx] if 0 < _sidx < len(sys.argv) else "us"
 
-_sfx        = "_london" if SESSION == "london" else ""
+_sfx_map    = {"london": "_london", "us": "", "nyopen": "_nyopen"}
+_sfx        = _sfx_map.get(SESSION, "")
 OUTPUT_FILE = BASE_DIR / f"briefing_{DATE_STR}{_sfx}.html"
 LATEST_FILE = BASE_DIR / f"briefing_latest{_sfx}.html"
 
@@ -526,18 +527,30 @@ def generate_ai_narrative(payload: dict) -> dict:
                 "role": "user",
                 "content": textwrap.dedent(f"""
                     You are a senior institutional trading analyst.
-                    {"Prepare a concise London-open briefing for a US index day trader (instruments: NQ, ES, /MNQ, /MES; London session: 3AM–8AM ET, NY session follows 9:30AM ET; date: " + DATE_DISPLAY + "). Focus on overnight futures movement, London open momentum, and key levels for the 3:30–8:00 AM ET window." if SESSION == "london" else "Prepare a concise pre-session briefing for a US index day trader (instruments: NQ, ES; session: 8AM–12PM ET; date: " + DATE_DISPLAY + ")."}
+                    {
+                        "london": f"Prepare a concise London-open briefing for a US index day trader (instruments: NQ, ES, /MNQ, /MES; London session: 3AM–8AM ET, NY session follows 9:30AM ET; date: {DATE_DISPLAY}). Focus on overnight futures movement, London open momentum, and key levels for the 3:30–8:00 AM ET window.",
+                        "us": f"Prepare a concise pre-market briefing for a US index day trader (instruments: NQ, ES; pre-market: 7:55 AM ET; regular session: 9:30AM–4:00PM ET; date: {DATE_DISPLAY}).",
+                        "nyopen": f"Prepare a concise post-bell briefing for a US index day trader (instruments: NQ, ES; NY bell just rung 9:15 AM ET; session: 9:30AM–4:00PM ET; date: {DATE_DISPLAY}). Focus on opening momentum, market structure setup, and confirmed bias for the main session."
+                    }.get(SESSION, "")
 
                     RAW DATA:
                     {json.dumps(payload, indent=2, default=str)[:6000]}
 
                     Return ONLY valid JSON (no markdown fences) with these string keys:
                     - macro_summary      : 4 bullet points on key macro/geo themes (use \\n• prefix each)
-                    - overnight_analysis : {"3 sentences on overnight NQ/ES narrative and London open momentum" if SESSION == "london" else "3 sentences on overnight NQ/ES narrative"}
+                    - overnight_analysis : {
+                        "london": "3 sentences on overnight NQ/ES narrative and London open momentum",
+                        "us": "3 sentences on overnight NQ/ES narrative",
+                        "nyopen": "3 sentences on opening 15-min action and NY session directional bias confirmation"
+                    }.get(SESSION, "")
                     - gamma_regime       : 2 sentences on gamma regime + intraday vol implication
                     - cta_flow           : 2 sentences on CTA/systematic flow
                     - sentiment_read     : 2 sentences interpreting retail sentiment vs institutional bias
-                    - session_bias       : {"One bold directional bias for London + early NY + 2 key watch levels" if SESSION == "london" else "One bold directional bias + 2 key watch levels"}
+                    - session_bias       : {
+                        "london": "One bold directional bias for London + early NY + 2 key watch levels",
+                        "us": "One bold directional bias + 2 key watch levels",
+                        "nyopen": "Confirmed directional bias post-bell + 2 key support/resistance levels for session main move"
+                    }.get(SESSION, "")
                     - risk_events        : Specific catalysts to watch today (bullets)
                     - key_levels_nq      : JSON object with keys: r1, r2, support1, support2, pivot (all numbers)
                     - key_levels_es      : JSON object with keys: r1, r2, support1, support2, pivot (all numbers)
@@ -1209,9 +1222,11 @@ def notify_ntfy(title, message, url=""):
 
 # ── GitHub Pages index redirect ────────────────────────────────────────────────
 def create_index_page(briefing_filename):
-    """Write session redirect page: index.html (US) or london.html (London)."""
-    page_name = "london.html" if SESSION == "london" else "index.html"
-    label     = "London session" if SESSION == "london" else "today's briefing"
+    """Write session redirect page: london.html, index.html (US), or nyopen.html."""
+    page_names = {"london": "london.html", "us": "index.html", "nyopen": "nyopen.html"}
+    labels     = {"london": "London session", "us": "US pre-market", "nyopen": "NY open session"}
+    page_name = page_names.get(SESSION, "index.html")
+    label     = labels.get(SESSION, "today's briefing")
     idx = BASE_DIR / page_name
     idx.write_text(f"""<!DOCTYPE html>
 <html>
@@ -1440,7 +1455,8 @@ def main():
         briefing_filename = OUTPUT_FILE.name
         create_index_page(briefing_filename)
         briefing_url = f"{PAGES_URL}/{briefing_filename}" if PAGES_URL else ""
-        session_label = "London Open" if SESSION == "london" else "US Pre-Market"
+        session_labels = {"london": "London Open", "us": "US Pre-Market", "nyopen": "NY Open"}
+        session_label = session_labels.get(SESSION, "Trading")
         notify_ntfy(
             f"Trading Briefing Ready — {session_label}",
             f"{DATE_DISPLAY} | NQ/ES/SPX {session_label} prep complete",
@@ -1453,12 +1469,14 @@ def main():
         # ── Desktop mode: open browser + Windows toast ────────────────────────
         webbrowser.open(LATEST_FILE.as_uri())
         print("  [+] Opened in browser")
-        session_label = "London Open" if SESSION == "london" else "US Pre-Market"
+        session_labels = {"london": "London Open", "us": "US Pre-Market", "nyopen": "NY Open"}
+        session_label = session_labels.get(SESSION, "Trading")
         notify_windows(
             f"Trading Briefing Ready — {session_label}",
             f"{DATE_DISPLAY} | NQ / ES / SPX {session_label} prep complete"
         )
         print("  [+] Notification sent")
+        print(f"  [+] Briefing available locally: {LATEST_FILE.as_uri()}")
 
     print(f"\n[OK] Briefing complete -- {GEN_TIME}")
 

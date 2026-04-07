@@ -8,6 +8,9 @@ on:
     # US pre-market — 7:55 AM ET (covers EDT UTC-4 and EST UTC-5)
     - cron: '55 11 * * 1-5'   # 7:55 AM EDT (summer, UTC-4)
     - cron: '55 12 * * 1-5'   # 7:55 AM EST (winter, UTC-5)
+    # NY open — 9:15 AM ET (covers EDT UTC-4 and EST UTC-5)
+    - cron: '15 13 * * 1-5'   # 9:15 AM EDT (summer, UTC-4)
+    - cron: '15 14 * * 1-5'   # 9:15 AM EST (winter, UTC-5)
 
   workflow_dispatch:
     inputs:
@@ -23,8 +26,9 @@ on:
         type: choice
         options:
           - auto
-          - us
           - london
+          - us
+          - nyopen
 
 permissions:
   contents: write    # commit docs/ back to repo
@@ -52,7 +56,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # ── Detect session (london = before 6 AM ET, us = after) ─────────────────
+      # ── Detect session (london < 6 AM, us 6-9 AM, nyopen >= 9 AM ET) ────────
       - name: Detect session
         id: session
         run: |
@@ -65,14 +69,17 @@ jobs:
             echo "session=$MANUAL" >> $GITHUB_OUTPUT
             echo "Manually selected session: $MANUAL"
           else
-            # Auto-detect: before 6 AM ET = London, 6 AM+ = US
-            TOTAL=$(TZ=America/New_York date +"%-H * 60 + %-M" | bc)
-            if [ "$TOTAL" -lt 360 ]; then
+            # Auto-detect: ET hour determines session
+            ET_HOUR=$(TZ=America/New_York date +%-H)
+            if [ "$ET_HOUR" -lt 6 ]; then
               echo "session=london" >> $GITHUB_OUTPUT
               echo "Auto-detected: London session ($(TZ=America/New_York date +%H:%M) ET)"
-            else
+            elif [ "$ET_HOUR" -lt 9 ]; then
               echo "session=us" >> $GITHUB_OUTPUT
-              echo "Auto-detected: US session ($(TZ=America/New_York date +%H:%M) ET)"
+              echo "Auto-detected: US pre-market session ($(TZ=America/New_York date +%H:%M) ET)"
+            else
+              echo "session=nyopen" >> $GITHUB_OUTPUT
+              echo "Auto-detected: NY open session ($(TZ=America/New_York date +%H:%M) ET)"
             fi
           fi
 
@@ -83,7 +90,10 @@ jobs:
           DATE="${{ steps.session.outputs.date }}"
           SESSION="${{ steps.session.outputs.session }}"
           SUFFIX=""
-          [ "$SESSION" = "london" ] && SUFFIX="_london"
+          case "$SESSION" in
+            london) SUFFIX="_london" ;;
+            nyopen) SUFFIX="_nyopen" ;;
+          esac
           FILE="docs/briefing_${DATE}${SUFFIX}.html"
           if [ -f "$FILE" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
