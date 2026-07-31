@@ -73,6 +73,43 @@ def main() -> int:
             "publish a DEGRADED page. Aborting instead.")
         return 3
 
+    # ---- refresh MenthorQ levels first so the gamma panel isn't a day stale ----
+    # The fetcher drives dashboard.menthorq.io through the Chrome DevTools
+    # session on :9222 and occasionally drops a symbol (SPX was missing from the
+    # 14:51 pull on 2026-07-31), so verify coverage and retry once. Levels are a
+    # nice-to-have: a miss degrades the panel, it does not block the briefing.
+    NOKEPA = Path(r"C:\Users\Anwender\Code\nokepa")
+    MQ_JSON = NOKEPA / "data" / "mq_levels.json"
+    WANT = {"SPX", "NDX", "SPY", "QQQ", "ES", "NQ"}
+
+    def _mq_syms() -> set[str]:
+        try:
+            import json
+            return set(json.loads(MQ_JSON.read_text(encoding="utf-8")).get("levels", {}))
+        except Exception:
+            return set()
+
+    try:
+        import urllib.request as _u
+        _u.urlopen("http://localhost:9222/json/list", timeout=5).read()
+        cdp = True
+    except Exception:
+        cdp = False
+        log("WARN: Chrome CDP :9222 unreachable — MenthorQ levels will be stale")
+
+    if cdp:
+        for attempt in (1, 2):
+            r = run([PY, str(NOKEPA / "scripts" / "ICT_mq_levels_fetch.py")],
+                    cwd=NOKEPA, timeout=600)
+            got = _mq_syms()
+            missing = WANT - got
+            log(f"mq levels attempt {attempt}: {len(got)}/6"
+                + (f" — missing {sorted(missing)}" if missing else " — complete"))
+            if not missing:
+                break
+    else:
+        log(f"mq levels: using cached {sorted(_mq_syms())}")
+
     # ---- generate straight into docs/ (same as CI does via TRADING_DIR) ----
     env = dict(os.environ, TRADING_DIR=str(DOCS))
     DOCS.mkdir(exist_ok=True)
