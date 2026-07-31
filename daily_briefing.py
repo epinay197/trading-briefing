@@ -648,11 +648,14 @@ def generate_ai_narrative(payload: dict) -> dict:
         "nyopen": "3 sentences on opening 15-min action and NY session directional bias confirmation",
     }.get(SESSION, "3 sentences on overnight NQ/ES narrative")
 
+    _cover = ("Cover the whole index complex, not just the futures: state the bias, "
+              "then give the decisive level for ES/SPX, NQ/NDX and the ETF pair "
+              "(SPY/QQQ), and say explicitly what invalidates the bias.")
     bias_spec = {
-        "london": "One bold directional bias for London + early NY + 2 key watch levels",
-        "us": "One bold directional bias + 2 key watch levels",
-        "nyopen": "Confirmed directional bias post-bell + 2 key support/resistance levels for the session main move",
-    }.get(SESSION, "One bold directional bias + 2 key watch levels")
+        "london": "One bold directional bias for London + early NY. " + _cover,
+        "us": "One bold directional bias. " + _cover,
+        "nyopen": "Confirmed directional bias post-bell for the session main move. " + _cover,
+    }.get(SESSION, "One bold directional bias. " + _cover)
 
     raw = json.dumps(payload, indent=2, default=str)[:6000]
 
@@ -663,10 +666,20 @@ def generate_ai_narrative(payload: dict) -> dict:
         RAW DATA:
         {raw}
 
-        Ground every level you quote in the RAW DATA above. Derive key levels from
-        the prices actually present there - never carry over levels from memory or
-        from a previous session. If the data is insufficient for a field, say so in
-        that field rather than inventing numbers.
+        Ground every level you quote in the RAW DATA above. Never carry over levels
+        from memory or from a previous session.
+
+        LEVEL DERIVATION - this is the important part. The RAW DATA carries
+        `dealer_gamma` (per-asset net GEX, gamma flip, call wall, put wall from
+        our own options engine) and `menthorq_levels` (call_resistance,
+        put_support, hvl, gamma_wall_0dte, and min_1d/max_1d - the implied
+        1-day range). Build key levels from THOSE, not from the session high/low:
+          - pivot      : the HVL / gamma flip, i.e. where dealer hedging is neutral
+          - resistance : call wall / call_resistance_0dte / max_1d, in that order
+          - support    : put wall / put_support_0dte / min_1d, in that order
+        Only fall back to session structure for a symbol with no positioning data.
+        A level that merely restates the day's high or low is not a level - if
+        that is all you have for an asset, say so in session_bias.
 
         Field guidance:
         - macro_summary      : 4 bullet points on key macro themes, each line prefixed with a bullet character
@@ -677,7 +690,11 @@ def generate_ai_narrative(payload: dict) -> dict:
         - session_bias       : {bias_spec}
         - risk_events        : specific catalysts to watch today, as bullet lines
         - tactical_framework : 4-5 short actionable rules for today, as bullet lines
-        - key_levels_nq / key_levels_es : numeric r1, r2, pivot, support1, support2
+        - key_levels_nq / key_levels_es / key_levels_spx / key_levels_ndx /
+          key_levels_spy / key_levels_qqq : numeric r1, r2, pivot, support1, support2
+          for each. Futures (NQ/ES) and cash (SPX/NDX/SPY/QQQ) must be internally
+          consistent - convert using the basis implied by the RAW DATA, do not
+          quote a cash level that contradicts its future.
     """).strip()
 
     LEVELS = {
@@ -689,11 +706,13 @@ def generate_ai_narrative(payload: dict) -> dict:
     }
     TEXT_FIELDS = ["macro_summary", "overnight_analysis", "gamma_regime", "cta_flow",
                    "sentiment_read", "session_bias", "risk_events", "tactical_framework"]
+    LEVEL_SYMS = ["nq", "es", "spx", "ndx", "spy", "qqq"]
+    LEVEL_KEYS = [f"key_levels_{x}" for x in LEVEL_SYMS]
     SCHEMA = {
         "type": "object",
         "properties": {**{f: {"type": "string"} for f in TEXT_FIELDS},
-                       "key_levels_nq": LEVELS, "key_levels_es": LEVELS},
-        "required": TEXT_FIELDS + ["key_levels_nq", "key_levels_es"],
+                       **{k: LEVELS for k in LEVEL_KEYS}},
+        "required": TEXT_FIELDS + LEVEL_KEYS,
         "additionalProperties": False,
     }
 
@@ -993,23 +1012,36 @@ def _build_wsb_rows(posts):
         </div>"""
     return out
 
-def _key_levels_html(kl_nq, kl_es):
-    def _row(label, nq_val, es_val, cls):
-        nq_s = f'<span class="levels-chip chip-{cls}">{fmt_price(nq_val, 0)}</span>' if nq_val else "—"
-        es_s = f'<span class="levels-chip chip-{cls}">{fmt_price(es_val, 0)}</span>' if es_val else "—"
-        return f"<tr><td>{label}</td><td>{nq_s}</td><td>{es_s}</td></tr>"
+def _key_levels_html(levels: dict):
+    """Rows = instrument, columns = level. Transposed from the old NQ/ES-only
+    layout so the full complex (futures + cash + ETFs) fits without 7 columns."""
+    order = [("NQ", "NQ"), ("ES", "ES"), ("SPX", "SPX"), ("NDX", "NDX"),
+             ("SPY", "SPY"), ("QQQ", "QQQ")]
+    cols = [("support2", "s"), ("support1", "s"), ("pivot", "p"),
+            ("r1", "r"), ("r2", "r")]
+
+    def chip(v, cls, dp):
+        return (f'<span class="levels-chip chip-{cls}">{fmt_price(v, dp)}</span>'
+                if v not in (None, "") else "&mdash;")
+
+    rows = ""
+    for key, label in order:
+        kl = levels.get(key) or {}
+        if not any(kl.get(c) for c, _ in cols):
+            continue
+        dp = 2 if key in ("SPY", "QQQ") else 0
+        rows += f"<tr><td>{label}</td>" + "".join(
+            f"<td>{chip(kl.get(c), cls, dp)}</td>" for c, cls in cols) + "</tr>"
+    if not rows:
+        return '<div class="menthorq-placeholder">No key levels available.</div>'
 
     return f"""
     <table>
-      <thead><tr><th>Level</th><th>NQ</th><th>ES</th></tr></thead>
-      <tbody>
-        {_row("Resistance 2", kl_nq.get("r2"),       kl_es.get("r2"),       "r")}
-        {_row("Resistance 1", kl_nq.get("r1"),       kl_es.get("r1"),       "r")}
-        {_row("Pivot",        kl_nq.get("pivot"),    kl_es.get("pivot"),    "p")}
-        {_row("Support 1",    kl_nq.get("support1"), kl_es.get("support1"), "s")}
-        {_row("Support 2",    kl_nq.get("support2"), kl_es.get("support2"), "s")}
-      </tbody>
+      <thead><tr><th>Instrument</th><th>Support 2</th><th>Support 1</th>
+      <th>Pivot</th><th>Resistance 1</th><th>Resistance 2</th></tr></thead>
+      <tbody>{rows}</tbody>
     </table>"""
+
 
 def _local_gamma_section(g):
     """Render gamma from NOKEPA + MenthorQ levels held locally."""
@@ -1195,12 +1227,12 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
                 "pivot": m.get("hvl"), "support1": m.get("put_support_0dte"),
                 "support2": m.get("put_support")}
 
-    kl_nq = narrative.get("key_levels_nq") or _mq_kl("NQ") or {
-        "r2": None, "r1": None, "pivot": None, "support1": None, "support2": None
-    }
-    kl_es = narrative.get("key_levels_es") or _mq_kl("ES") or {
-        "r2": None, "r1": None, "pivot": None, "support1": None, "support2": None
-    }
+    # Narrative levels win; real MenthorQ levels on disk are the fallback so the
+    # table still populates when the model omits a symbol.
+    kl_all = {}
+    for _sym in ("NQ", "ES", "SPX", "NDX", "SPY", "QQQ"):
+        kl_all[_sym] = (narrative.get(f"key_levels_{_sym.lower()}")
+                        or _mq_kl(_sym) or {})
 
     # ── Bias: live narrative only. A stale directional call is the single most
     #    dangerous thing this page can publish, so absence is stated explicitly.
@@ -1366,8 +1398,8 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
   </div>
 
   <div class="panel">
-    <div class="panel-title"><span class="dot" style="background:#fbbf24"></span>Key Levels — NQ / ES</div>
-    {_key_levels_html(kl_nq, kl_es)}
+    <div class="panel-title"><span class="dot" style="background:#fbbf24"></span>Key Levels — Index Complex</div>
+    {_key_levels_html(kl_all)}
     <div style="margin-top:10px;font-size:11px;color:#8b949e">
       <span class="levels-chip chip-r">R</span> Resistance &nbsp;
       <span class="levels-chip chip-p">P</span> Pivot &nbsp;
@@ -1691,11 +1723,19 @@ def main():
     narrative = {}
     if ANTHROPIC_API_KEY:
         print("  [...] Generating AI narrative...")
+        # Feed the model the ACTUAL computed levels. Without this it only saw
+        # futures prices + session hi/lo and was reverse-engineering "key levels"
+        # from the day's range — NQ R2 came back as 28,726 against a session high
+        # of 28,725.75. Anchoring on real gamma walls and MenthorQ bands turns an
+        # interpolation of the range into positioning-derived structure.
+        _g = results.get("gamma", {}) or {}
         narrative = generate_ai_narrative({
             "futures":   results.get("futures", []),
             "fear_greed":results.get("fg", {}),
             "sentiment": {k: {"bull_pct": v.get("bull_pct"), "bear_pct": v.get("bear_pct")}
                           for k, v in st_symbols.items() if v},
+            "dealer_gamma": _g.get("assets", {}),
+            "menthorq_levels": _g.get("mq", {}),
         })
         # Never claim success unconditionally — the old code printed "Narrative
         # ready" even when generate_ai_narrative() had returned {"_error": ...},
