@@ -718,13 +718,18 @@ def generate_ai_narrative(payload: dict) -> dict:
 
     try:
         client = _ant.Anthropic(api_key=ANTHROPIC_API_KEY)
-        msg = client.messages.create(
+        # Stream. Once the payload carried dealer_gamma + menthorq_levels and the
+        # schema grew to six level sets, the non-streaming call started returning
+        # APITimeoutError. Streaming holds the connection open and
+        # get_final_message() still gives us the assembled response.
+        with client.messages.stream(
             model=NARRATIVE_MODEL,
             max_tokens=8000,
             output_config={"format": {"type": "json_schema", "schema": SCHEMA},
                            "effort": "medium"},
             messages=[{"role": "user", "content": prompt}],
-        )
+        ) as stream:
+            msg = stream.get_final_message()
         if msg.stop_reason == "refusal":
             return {"_error": "model refused the request"}
         text = next((b.text for b in msg.content if b.type == "text"), "")
