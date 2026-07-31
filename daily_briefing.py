@@ -209,6 +209,36 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # Narrative model. Overridable so a bad default can be swapped without a code edit.
 NARRATIVE_MODEL = os.environ.get("BRIEFING_MODEL", "claude-opus-5")
 
+
+def _market_phase(now_et=None):
+    """Where in the session we are — the briefing must read differently at
+    07:55 (nothing has traded) than at 11:30 (the range is set)."""
+    from zoneinfo import ZoneInfo
+    n = now_et or datetime.now(ZoneInfo("America/New_York"))
+    hm = n.hour * 60 + n.minute
+    if n.weekday() >= 5:
+        return ("closed", "Market closed. Frame the NEXT session; nothing here is actionable today.")
+    if hm < 570:
+        return ("pre-open", "PRE-OPEN. Nothing has traded in RTH. Overnight acceptance is PROVISIONAL — "
+                            "Globex volume is not a grade. The 09:30-09:45 candle is the judge. "
+                            "Frame scenarios and triggers; do not declare a trend.")
+    if hm < 600:
+        return ("opening", "OPENING DRIVE (09:30-10:00). The tiebreaker candle is printing. "
+                           "Call what the first range means, flag gap-and-trap risk, stay provisional.")
+    if hm < 690:
+        return ("morning", "PRIME WINDOW (10:00-11:30). The range is set and this is the only high-quality "
+                           "window. Be directional and specific about entry location.")
+    if hm < 810:
+        return ("midday", "MIDDAY (11:30-13:30). Low-information chop. Say plainly that initiating here is "
+                          "negative-edge; frame the afternoon instead.")
+    if hm < 900:
+        return ("afternoon", "AFTERNOON (13:30-15:00). Second-leg window. Only valid if the morning made a "
+                             "clean high or low; if it chopped, say so.")
+    if hm < 960:
+        return ("power-hour", "POWER HOUR (15:00-16:00). Pin gravity and closing imbalance dominate. "
+                              "Focus on the nearest wall as a magnet and on flattening.")
+    return ("post-close", "POST-CLOSE. Grade what happened against the levels and set up the next session.")
+
 # Session: "london" (3:30 AM ET), "us" (7:55 AM ET), or "nyopen" (9:15 AM ET)
 _sidx    = sys.argv.index("--session") + 1 if "--session" in sys.argv else -1
 SESSION  = sys.argv[_sidx] if 0 < _sidx < len(sys.argv) else "us"
@@ -658,6 +688,10 @@ def generate_ai_narrative(payload: dict) -> dict:
     }.get(SESSION, "One bold directional bias. " + _cover)
 
     raw = json.dumps(payload, indent=2, default=str)[:6000]
+    from zoneinfo import ZoneInfo as _Z
+    _n = datetime.now(_Z("America/New_York"))
+    _now_et = _n.strftime("%H:%M")
+    _phase, _phase_note = _market_phase(_n)
 
     prompt = textwrap.dedent(f"""
         You are a senior institutional trading analyst.
@@ -681,13 +715,40 @@ def generate_ai_narrative(payload: dict) -> dict:
         A level that merely restates the day's high or low is not a level - if
         that is all you have for an asset, say so in session_bias.
 
+        TIMING — you are shipping at {_now_et} ET. {_phase_note}
+        Write for that moment. Do not describe the open as upcoming if it has
+        happened, and do not call a trend before the 09:30-09:45 candle closes.
+
+        SCENARIOS — give exactly 3, probabilities as integers summing to 100,
+        ordered most-likely first. Each needs a concrete numeric trigger, the
+        path it takes if it plays, and what invalidates it. Name them for the
+        behaviour, not "bullish/bearish/neutral".
+
+        TWO-ENGINE RULE — a break of a major wall needs confirmation from
+        something outside price. State the cross-asset requirement explicitly
+        (a VIX threshold, a 10Y threshold), e.g. "first touch is fade-favoured
+        UNLESS 10Y slips under X while VIX holds under Y". If only one engine
+        fires, that is rotation, not permission.
+
+        LOCATION DISCIPLINE — say where the entries ARE and, just as important,
+        where they are NOT. Mid-range is not a location. Chasing after an
+        extended move has bad location math even when the direction is right.
+
         Field guidance:
         - macro_summary      : 4 bullet points on key macro themes, each line prefixed with a bullet character
         - overnight_analysis : {overnight_spec}
         - gamma_regime       : 2 sentences on gamma regime + intraday vol implication
         - cta_flow           : 2 sentences on CTA / systematic flow
         - sentiment_read     : 2 sentences interpreting retail sentiment vs institutional bias
-        - session_bias       : {bias_spec}
+        - session_bias       : object. headline = one decisive sentence ({bias_spec}).
+          decisive_level = the single number the day turns on, cash and future.
+          above / below = what each side opens up, with targets. invalidation =
+          what kills the call. Keep every field to one or two sentences - this
+          renders as a compact card, not prose.
+        - scenarios          : the 3 weighted scenarios described above
+        - location_discipline: 2 sentences on where to enter and where not to
+        - one_liner          : ONE panic-proof sentence a trader can hold in their
+          head all session. The decisive level, both directions, the kill switch.
         - risk_events        : specific catalysts to watch today, as bullet lines
         - tactical_framework : 4-5 short actionable rules for today, as bullet lines
         - key_levels_nq / key_levels_es / key_levels_spx / key_levels_ndx /
@@ -705,14 +766,41 @@ def generate_ai_narrative(payload: dict) -> dict:
         "additionalProperties": False,
     }
     TEXT_FIELDS = ["macro_summary", "overnight_analysis", "gamma_regime", "cta_flow",
-                   "sentiment_read", "session_bias", "risk_events", "tactical_framework"]
+                   "sentiment_read", "risk_events", "tactical_framework",
+                   "location_discipline", "one_liner"]
+    BIAS_OBJ = {
+        "type": "object",
+        "properties": {
+            "headline": {"type": "string"},
+            "decisive_level": {"type": "string"},
+            "above": {"type": "string"},
+            "below": {"type": "string"},
+            "invalidation": {"type": "string"},
+        },
+        "required": ["headline", "decisive_level", "above", "below", "invalidation"],
+        "additionalProperties": False,
+    }
+    SCENARIO = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "probability": {"type": "integer"},
+            "trigger": {"type": "string"},
+            "path": {"type": "string"},
+            "invalidation": {"type": "string"},
+        },
+        "required": ["name", "probability", "trigger", "path", "invalidation"],
+        "additionalProperties": False,
+    }
     LEVEL_SYMS = ["nq", "es", "spx", "ndx", "spy", "qqq"]
     LEVEL_KEYS = [f"key_levels_{x}" for x in LEVEL_SYMS]
     SCHEMA = {
         "type": "object",
         "properties": {**{f: {"type": "string"} for f in TEXT_FIELDS},
-                       **{k: LEVELS for k in LEVEL_KEYS}},
-        "required": TEXT_FIELDS + LEVEL_KEYS,
+                       **{k: LEVELS for k in LEVEL_KEYS},
+                       "session_bias": BIAS_OBJ,
+                       "scenarios": {"type": "array", "items": SCENARIO}},
+        "required": TEXT_FIELDS + LEVEL_KEYS + ["session_bias", "scenarios"],
         "additionalProperties": False,
     }
 
@@ -878,6 +966,27 @@ tr:hover td { background: rgba(255,255,255,0.03); }
 }
 .regime-neg  { background: rgba(248,113,113,0.15); color: var(--red);   border: 1px solid rgba(248,113,113,0.3); }
 .regime-pos  { background: rgba(74,222,128,0.15);  color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+.bias-head { font-size:14px; font-weight:700; line-height:1.45; margin-bottom:12px; color:var(--text); }
+.bias-grid { width:100%; border-collapse:collapse; font-size:12px; }
+.bias-grid td { padding:7px 0; vertical-align:top; border-bottom:1px solid var(--border); line-height:1.55; }
+.bias-grid td:first-child { width:88px; color:var(--muted); font-size:10.5px; letter-spacing:.5px;
+  text-transform:uppercase; font-weight:600; white-space:nowrap; padding-right:12px; }
+.bias-grid tr:last-child td { border-bottom:none; }
+.bias-kill td { color:var(--red); }
+.oneliner { background:rgba(96,165,250,0.08); border:1px solid rgba(96,165,250,0.35);
+  border-left:3px solid var(--blue); border-radius:8px; padding:12px 16px; margin-bottom:16px;
+  font-size:13.5px; line-height:1.6; color:var(--text); }
+.oneliner b { color:var(--blue); font-size:10.5px; letter-spacing:.6px; text-transform:uppercase;
+  display:block; margin-bottom:4px; }
+.scn { border:1px solid var(--border); border-radius:8px; padding:12px 14px; background:rgba(255,255,255,0.02); }
+.scn-h { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:8px; }
+.scn-n { font-size:12.5px; font-weight:700; color:var(--text); }
+.scn-p { font-size:15px; font-weight:800; color:var(--blue); white-space:nowrap; }
+.scn-bar { height:3px; background:var(--border); border-radius:2px; margin-bottom:10px; overflow:hidden; }
+.scn-bar i { display:block; height:100%; background:var(--blue); }
+.scn dl { margin:0; font-size:11.5px; line-height:1.55; }
+.scn dt { color:var(--muted); font-size:10px; letter-spacing:.5px; text-transform:uppercase; margin-top:6px; }
+.scn dd { margin:1px 0 0; color:var(--text); }
 .regime-neutral { background: rgba(251,191,36,0.15); color: var(--yellow); border: 1px solid rgba(251,191,36,0.3); }
 .menthorq-placeholder {
   color: var(--muted); font-size: 12px; font-style: italic;
@@ -1046,6 +1155,47 @@ def _key_levels_html(levels: dict):
       <th>Pivot</th><th>Resistance 1</th><th>Resistance 2</th></tr></thead>
       <tbody>{rows}</tbody>
     </table>"""
+
+
+def _bias_card(bias, cls):
+    """Compact labelled card. The old version dumped one long paragraph into a
+    narrow column, which read as a wall of text."""
+    if not isinstance(bias, dict) or not bias.get("headline"):
+        return (f'<div class="bias-box {cls}">'
+                'BIAS UNAVAILABLE — no live narrative generated this run. '
+                'Do not trade from this page today.</div>')
+    rows = ""
+    for label, key, extra in (("Decisive", "decisive_level", ""), ("Above", "above", ""),
+                              ("Below", "below", ""), ("Invalidation", "invalidation", " class=\"bias-kill\"")):
+        v = bias.get(key)
+        if v:
+            rows += f'<tr{extra}><td>{label}</td><td>{html.escape(str(v))}</td></tr>'
+    return (f'<div class="bias-box {cls}">'
+            f'<div class="bias-head">{html.escape(str(bias["headline"]))}</div>'
+            f'<table class="bias-grid"><tbody>{rows}</tbody></table></div>')
+
+
+def _scenarios_html(scns):
+    if not isinstance(scns, list) or not scns:
+        return ""
+    cards = ""
+    for sc in scns[:3]:
+        if not isinstance(sc, dict):
+            continue
+        pct = sc.get("probability") or 0
+        try:
+            pct = max(0, min(100, int(pct)))
+        except Exception:
+            pct = 0
+        cards += (f'<div class="scn"><div class="scn-h">'
+                  f'<span class="scn-n">{html.escape(str(sc.get("name","")))}</span>'
+                  f'<span class="scn-p">{pct}%</span></div>'
+                  f'<div class="scn-bar"><i style="width:{pct}%"></i></div><dl>'
+                  f'<dt>Trigger</dt><dd>{html.escape(str(sc.get("trigger","")))}</dd>'
+                  f'<dt>Path</dt><dd>{html.escape(str(sc.get("path","")))}</dd>'
+                  f'<dt>Invalidation</dt><dd>{html.escape(str(sc.get("invalidation","")))}</dd>'
+                  f'</dl></div>')
+    return f'<div class="grid-3" style="gap:14px">{cards}</div>'
 
 
 def _playbook_html(gamma):
@@ -1307,12 +1457,14 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
 
     # ── Bias: live narrative only. A stale directional call is the single most
     #    dangerous thing this page can publish, so absence is stated explicitly.
-    narrative_ok = bool(narrative.get("session_bias"))
-    bias_text = narrative.get("session_bias") or (
-        "BIAS UNAVAILABLE — no live narrative generated this run. "
-        "Do not trade from this page today; the market snapshot above is live, "
-        "everything analytical is not.")
-    bias_cls  = _bias_class(bias_text) if narrative_ok else "neutral-b"
+    _bias = narrative.get("session_bias")
+    narrative_ok = isinstance(_bias, dict) and bool(_bias.get("headline"))
+    bias_cls = _bias_class(_bias.get("headline", "")) if narrative_ok else "neutral-b"
+    bias_card = _bias_card(_bias, bias_cls)
+    scenarios_html = _scenarios_html(narrative.get("scenarios"))
+    _ol = narrative.get("one_liner")
+    oneliner_html = (f'<div class="oneliner"><b>One-liner &mdash; panic-proof</b>{html.escape(str(_ol))}</div>'
+                     if _ol else "")
 
     # ── Degraded-run banner ───────────────────────────────────────────────────
     # Make a half-dead briefing impossible to mistake for a live one.
@@ -1373,6 +1525,7 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
 <!-- ── Market Status Banner ──────────────────────────────────────────────── -->
 <div style="margin-bottom:12px">{mkt_banner}</div>
 {degraded_banner}
+{oneliner_html}
 
 <!-- ── ROW 1: Market Snapshot + Fear/Greed + VIX ─────────────────────────── -->
 <div class="grid-3" style="margin-bottom:16px">
@@ -1487,15 +1640,23 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
 
   <div class="panel">
     <div class="panel-title"><span class="dot" style="background:#4ade80"></span>Session Bias</div>
-    <div class="bias-box {bias_cls}">
-      {html.escape(bias_text)}
-    </div>
+    {bias_card}
     <div style="margin-top:14px;font-size:11px;color:#8b949e">Tactical Framework</div>
     <div style="margin-top:6px;font-size:12px;line-height:1.8">
       {_narrative_block("tactical_framework", narrative)}
     </div>
+    <div style="margin-top:12px;font-size:11px;color:#8b949e">Location discipline</div>
+    <div style="margin-top:4px;font-size:12px;line-height:1.65">
+      {_narrative_block("location_discipline", narrative)}
+    </div>
   </div>
 
+</div>
+
+<!-- ── ROW 3a: Scenarios ──────────────────────────────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#c084fc"></span>Scenarios &mdash; weighted, most likely first</div>
+  {scenarios_html}
 </div>
 
 <!-- ── ROW 3b: Session Playbook ───────────────────────────────────────────── -->
