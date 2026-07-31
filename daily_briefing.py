@@ -542,6 +542,86 @@ def fetch_menthorq():
     }
 
 
+NOKEPA_DIR = Path(r"C:\Users\Anwender\Code\nokepa")
+
+
+def fetch_local_gamma() -> dict:
+    """Gamma / GEX / DEX from the user's OWN engines — not from a vendor scrape.
+
+    2026-07-31: this page used to source gamma by screen-scraping
+    menthorq.com/wp-admin, which is dead legacy infrastructure (MenthorQ moved to
+    dashboard.menthorq.io) and returned HTTP 403 '-1' on every slug. Meanwhile
+    NOKEPA already computes net GEX, gamma flip, walls and net DEX locally, and
+    ICT_mq_levels_fetch.py already pulls real MenthorQ levels via the Chrome
+    DevTools session into data/mq_levels.json. Both are authoritative here.
+
+    Order of preference per asset:
+      1. the running NOKEPA server on :8780 (live intraday)
+      2. data/gex_cache.json (persisted snapshot, when the server is session-gated off)
+    MenthorQ levels always come from data/mq_levels.json.
+    """
+    out = {"assets": {}, "mq": {}, "source": None, "mq_fetched_at": None}
+
+    def _api(path, timeout=45):
+        r = requests.get(f"http://127.0.0.1:8780{path}", timeout=timeout)
+        r.raise_for_status()
+        return r.json()
+
+    live = False
+    try:
+        requests.get("http://127.0.0.1:8780/api/health", timeout=20).raise_for_status()
+        live = True
+    except Exception as e:
+        out["health_err"] = f"{type(e).__name__}: {str(e)[:120]}"
+    out["source"] = "nokepa-live" if live else "nokepa-cache"
+
+    for a in ("SPX", "NDX", "SPY", "QQQ"):
+        rec = {}
+        if live:
+            try:
+                d = _api(f"/api/dealer/{a}", 120) or {}
+                rec.update({k: d.get(k) for k in
+                            ("net_gex", "net_dex", "gex_by_dte", "pc_ratio",
+                             "skew_0dte_pct", "spot")})
+            except Exception as e:
+                rec["dealer_err"] = type(e).__name__
+                live_ok = False
+            try:
+                g = _api(f"/api/gex_live/{a}", 20) or {}
+                rec.update({"flip": g.get("gamma_flip") or g.get("gamma_flip_est"),
+                            "call_wall": g.get("pgex_wall"), "put_wall": g.get("ngex_wall"),
+                            "market_char": g.get("market_char")})
+            except Exception:
+                pass
+        # Levels: always backfill from the persisted snapshot for anything the
+        # live call didn't supply, so a slow /api/gex_live can't blank the row.
+        if True:
+            try:
+                cache = json.loads((NOKEPA_DIR / "data" / "gex_cache.json").read_text(encoding="utf-8"))
+                e = cache.get(a)
+                if isinstance(e, list) and len(e) == 2:
+                    e = e[1]
+                if isinstance(e, dict):
+                    for k, v in (("flip", e.get("gamma_flip") or e.get("gamma_flip_est")),
+                                 ("call_wall", e.get("pgex_wall")),
+                                 ("put_wall", e.get("ngex_wall")),
+                                 ("market_char", e.get("market_char"))):
+                        if rec.get(k) is None and v is not None:
+                            rec[k] = v
+            except Exception as ex:
+                rec["cache_err"] = type(ex).__name__
+        out["assets"][a] = rec
+
+    try:
+        mq = json.loads((NOKEPA_DIR / "data" / "mq_levels.json").read_text(encoding="utf-8"))
+        out["mq"] = mq.get("levels", {})
+        out["mq_fetched_at"] = datetime.fromtimestamp(mq["fetched_at"]).strftime("%Y-%m-%d %H:%M")
+    except Exception as e:
+        out["mq_err"] = f"{type(e).__name__}: {e}"
+
+    return out
+
+
 def generate_ai_narrative(payload: dict) -> dict:
     """Claude generates concise, actionable analysis from raw data.
 
@@ -931,6 +1011,52 @@ def _key_levels_html(kl_nq, kl_es):
       </tbody>
     </table>"""
 
+def _local_gamma_section(g):
+    """Render gamma from NOKEPA + MenthorQ levels held locally."""
+    if not g or not g.get("assets"):
+        return '<div class="menthorq-placeholder">Local gamma engine unavailable.</div>'
+
+    def money(v):
+        if v is None:
+            return "&mdash;"
+        try:
+            v = float(v)
+        except Exception:
+            return "&mdash;"
+        cls = "up" if v > 0 else ("down" if v < 0 else "")
+        s = f"{v/1e9:+.2f}B" if abs(v) >= 1e8 else f"{v/1e6:+.0f}M"
+        return f'<span class="{cls}">{s}</span>'
+
+    def num(v):
+        return "&mdash;" if v in (None, "") else (f"{float(v):,.0f}" if isinstance(v, (int, float)) else str(v))
+
+    rows = ""
+    for a, r in g["assets"].items():
+        m = (g.get("mq") or {}).get(a, {})
+        rows += (f"<tr><td>{a}</td><td>{money(r.get('net_gex'))}</td>"
+                 f"<td>{money((r.get('gex_by_dte') or {}).get('0-5'))}</td>"
+                 f"<td>{money(r.get('net_dex'))}</td>"
+                 f"<td>{num(r.get('flip'))}</td><td>{num(r.get('call_wall'))}</td>"
+                 f"<td>{num(r.get('put_wall'))}</td>"
+                 f"<td>{num(m.get('call_resistance_0dte'))}</td>"
+                 f"<td>{num(m.get('put_support_0dte'))}</td>"
+                 f"<td>{num(m.get('min_1d'))}&ndash;{num(m.get('max_1d'))}</td></tr>")
+
+    src = "NOKEPA live (:8780)" if g.get("source") == "nokepa-live" else "NOKEPA cached snapshot"
+    mqs = f"MenthorQ levels {g.get('mq_fetched_at') or 'n/a'}" if g.get("mq") else "MenthorQ levels unavailable"
+    return f"""
+    <table>
+      <thead><tr><th>Asset</th><th>Net GEX</th><th>0-5d</th><th>Net DEX</th>
+      <th>&gamma;flip</th><th>Call wall</th><th>Put wall</th>
+      <th>MQ CR0</th><th>MQ PS0</th><th>MQ 1-day band</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    <div style="font-size:10.5px;color:#8b949e;margin-top:8px">
+      Source: {src} &middot; {mqs}. Net GEX dealer-signed (negative = dealers short
+      gamma, moves amplify); Net DEX dealer-signed.
+    </div>"""
+
+
 def _menthorq_section(mq):
     status = mq.get("status", "no_credentials")
     if status == "no_credentials":
@@ -1007,7 +1133,7 @@ def _bias_class(text):
         return "bullish"
     return "neutral-b"
 
-def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=None):
+def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=None, gamma=None):
     # ── Session countdown ─────────────────────────────────────────────────────
     session_open = NOW.replace(hour=9, minute=30, second=0, microsecond=0)
     mins_to_open = int((session_open - NOW).total_seconds() / 60)
@@ -1038,7 +1164,19 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     # ── Gamma regime badge ────────────────────────────────────────────────────
     # Do NOT assert a gamma regime we have not measured. With MenthorQ down this
     # badge used to claim "NEGATIVE GAMMA" every day regardless of the tape.
-    regime_label = "GAMMA REGIME UNAVAILABLE — no MenthorQ data"
+    gamma = gamma or {}
+    # Regime comes from OUR OWN engine's net GEX, not from a vendor scrape.
+    _spx = (gamma.get("assets") or {}).get("SPX") or {}
+    _ng = _spx.get("net_gex")
+    if isinstance(_ng, (int, float)):
+        if _ng < 0:
+            regime_label = f"NEGATIVE GAMMA — vol amplifying (SPX net GEX {_ng/1e6:+.0f}M)"
+            regime_class = "regime-neg"
+        else:
+            regime_label = f"POSITIVE GAMMA — vol dampening (SPX net GEX {_ng/1e6:+.0f}M)"
+            regime_class = "regime-pos"
+    else:
+        regime_label = "GAMMA REGIME UNAVAILABLE — local engine unreachable"
     regime_class = "regime-neutral"
     mq_ok = mq.get("status") == "ok" and mq.get("ok_count", 0) > 0
     if mq_ok:
@@ -1049,10 +1187,18 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     # The old defaults (24858/24634/24400/23971/23800) were frozen from an early
     # 2026 session and kept publishing while NQ traded ~28,100 — a 3,400-point
     # error presented as today's pivot. Blank beats wrong.
-    kl_nq = narrative.get("key_levels_nq") or {
+    def _mq_kl(sym):
+        m = (gamma.get("mq") or {}).get(sym) or {}
+        if not m:
+            return None
+        return {"r2": m.get("call_resistance"), "r1": m.get("call_resistance_0dte"),
+                "pivot": m.get("hvl"), "support1": m.get("put_support_0dte"),
+                "support2": m.get("put_support")}
+
+    kl_nq = narrative.get("key_levels_nq") or _mq_kl("NQ") or {
         "r2": None, "r1": None, "pivot": None, "support1": None, "support2": None
     }
-    kl_es = narrative.get("key_levels_es") or {
+    kl_es = narrative.get("key_levels_es") or _mq_kl("ES") or {
         "r2": None, "r1": None, "pivot": None, "support1": None, "support2": None
     }
 
@@ -1070,8 +1216,8 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     _missing = []
     if not narrative_ok:
         _missing.append("AI narrative (ANTHROPIC_API_KEY)")
-    if not mq_ok:
-        _missing.append("MenthorQ gamma / CTA data (MENTHORQ_PASSWORD)")
+    if not (gamma.get("assets") or {}).get("SPX", {}).get("net_gex"):
+        _missing.append("local gamma engine (NOKEPA :8780 / gex_cache)")
     degraded_banner = ""
     if _missing:
         degraded_banner = (
@@ -1205,16 +1351,16 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
 
   <div class="panel">
     <div class="panel-title"><span class="dot" style="background:#f87171"></span>Gamma / Options Regime (SPX)</div>
-    {_menthorq_section(mq)}
+    {_local_gamma_section(gamma)}
     {_narrative_block("gamma_regime", narrative,
         "SPX is operating in negative gamma — dealers are net short gamma and must sell ES futures on declines, amplifying down-moves. "
         "SPX Volatility Trigger ~6,900 is overhead resistance; reclaim needed for regime shift. VIX testing but not closing above 30."
     )}
     <div style="margin-top:12px">
-      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">MenthorQ Live Data</div>
-      <div style="font-size:11px;color:#8b949e">CTA Dashboard</div>
-      <div class="menthorq-placeholder" style="text-align:left;padding:4px 0">
-        {'[OK] ' + str(mq.get("ok_count",0)) + ' charts loaded' if mq.get('status') == 'ok' else '[LOCKED] Set MENTHORQ_PASSWORD to enable'}
+      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">
+        Gamma and levels sourced from local engines (NOKEPA + MenthorQ via CDP).
+        The legacy menthorq.com WordPress scrape was retired 2026-07-31 &mdash;
+        MenthorQ now lives at dashboard.menthorq.io.
       </div>
     </div>
   </div>
@@ -1526,7 +1672,7 @@ def main():
         threading.Thread(target=_run, args=("st_es",            fetch_stocktwits_symbol, "ES")),
         threading.Thread(target=_run, args=("st_trending",      fetch_stocktwits_trending)),
         threading.Thread(target=_run, args=("wsb",              fetch_reddit_wsb)),
-        threading.Thread(target=_run, args=("menthorq",         fetch_menthorq)),
+        threading.Thread(target=_run, args=("gamma",            fetch_local_gamma)),
     ]
     for t in threads: t.start()
     for t in threads: t.join()
@@ -1572,7 +1718,8 @@ def main():
         st_symbols  = st_symbols,
         st_trending = results.get("st_trending", []),
         wsb         = results.get("wsb", []),
-        mq          = results.get("menthorq", {"status": "no_credentials"}),
+        mq          = {"status": "retired"},
+        gamma       = results.get("gamma", {}),
         narrative   = narrative,
         mkt         = mkt,
     )
