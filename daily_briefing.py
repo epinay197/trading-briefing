@@ -18,7 +18,7 @@ Environment variables (set via Claude Code settings or shell profile):
 import subprocess, sys
 
 def _pip(*pkgs):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", *pkgs, "-q", "--quiet"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", *pkgs, "-q", "--quiet"], creationflags=0x08000000)
 
 try:
     import requests
@@ -206,6 +206,8 @@ def get_market_status(dt: datetime) -> dict:
 MENTHORQ_EMAIL    = os.environ.get("MENTHORQ_EMAIL", "")
 MENTHORQ_PASSWORD = os.environ.get("MENTHORQ_PASSWORD", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+# Narrative model. Overridable so a bad default can be swapped without a code edit.
+NARRATIVE_MODEL = os.environ.get("BRIEFING_MODEL", "claude-opus-5")
 
 # Session: "london" (3:30 AM ET), "us" (7:55 AM ET), or "nyopen" (9:15 AM ET)
 _sidx    = sys.argv.index("--session") + 1 if "--session" in sys.argv else -1
@@ -476,12 +478,38 @@ def fetch_menthorq():
                 headers={**hdr, "Referer": f"https://menthorq.com/account/?action=data&type=dashboard&commands=cta&date={DATE_STR}"},
                 timeout=15,
             )
+            # WordPress admin-ajax returns a bare `-1` body (HTTP 403) when the
+            # nonce is rejected or the account lacks permission for the action —
+            # so `j` is an int, not a dict, and the old `j.get("data", {})` raised
+            # AttributeError. The outer except turned that into the useless
+            # "'int' object has no attribute 'get'" seen against every slug.
             j = resp.json()
+            if not isinstance(j, dict):
+                charts[slug] = {
+                    "label": label, "status": "api_error",
+                    "msg": (f"HTTP {resp.status_code}, body {j!r} — WordPress rejected "
+                            f"the admin-ajax call (nonce invalid or account not "
+                            f"entitled to '{slug}')")}
+                continue
+            data = j.get("data")
+            if not isinstance(data, dict):
+                charts[slug] = {"label": label, "status": "api_error",
+                                "msg": f"non-dict data payload ({type(data).__name__}) "
+                                       f"— usually an auth/entitlement failure"}
+                continue
             if not j.get("success"):
-                charts[slug] = {"label": label, "status": "api_error", "msg": j.get("data", {}).get("message", "")}
+                charts[slug] = {"label": label, "status": "api_error",
+                                "msg": data.get("message", "")}
                 continue
 
-            resource   = j["data"].get("resource", {})
+            # `resource` is also int-typed on some entitlement failures — same
+            # AttributeError one level deeper, so guard it the same way.
+            resource = data.get("resource")
+            if not isinstance(resource, dict):
+                charts[slug] = {"label": label, "status": "api_error",
+                                "msg": f"non-dict resource ({type(resource).__name__}) "
+                                       f"— slug likely not entitled on this account"}
+                continue
             image_url  = resource.get("image_url", "")
             text_data  = resource.get("text_data") or ""
             table_data = resource.get("table_data") or []
@@ -515,51 +543,98 @@ def fetch_menthorq():
 
 
 def generate_ai_narrative(payload: dict) -> dict:
-    """Claude generates concise, actionable analysis from raw data."""
+    """Claude generates concise, actionable analysis from raw data.
+
+    2026-07-31: this function had NEVER succeeded. The prompt was built as an
+    f-string containing an inline dict literal, so Python parsed the ``:`` after
+    ``"london"`` as a format specifier and every call raised
+    ``ValueError: Invalid format specifier``. The bare ``except`` swallowed it
+    into {"_error": ...}, the caller printed "Narrative ready" regardless, and
+    the page silently fell back to hardcoded static prose. The session-specific
+    strings are now built OUTSIDE the f-string.
+    """
     if not HAS_ANTHROPIC or not ANTHROPIC_API_KEY:
         return {}
+
+    intro = {
+        "london": f"Prepare a concise London-open briefing for a US index day trader (instruments: NQ, ES, /MNQ, /MES; London session: 3AM-8AM ET, NY session follows 9:30AM ET; date: {DATE_DISPLAY}). Focus on overnight futures movement, London open momentum, and key levels for the 3:30-8:00 AM ET window.",
+        "us": f"Prepare a concise pre-market briefing for a US index day trader (instruments: NQ, ES; pre-market: 7:55 AM ET; regular session: 9:30AM-4:00PM ET; date: {DATE_DISPLAY}).",
+        "nyopen": f"Prepare a concise post-bell briefing for a US index day trader (instruments: NQ, ES; NY bell just rung 9:15 AM ET; session: 9:30AM-4:00PM ET; date: {DATE_DISPLAY}). Focus on opening momentum, market structure setup, and confirmed bias for the main session.",
+    }.get(SESSION, "")
+
+    overnight_spec = {
+        "london": "3 sentences on overnight NQ/ES narrative and London open momentum",
+        "us": "3 sentences on overnight NQ/ES narrative",
+        "nyopen": "3 sentences on opening 15-min action and NY session directional bias confirmation",
+    }.get(SESSION, "3 sentences on overnight NQ/ES narrative")
+
+    bias_spec = {
+        "london": "One bold directional bias for London + early NY + 2 key watch levels",
+        "us": "One bold directional bias + 2 key watch levels",
+        "nyopen": "Confirmed directional bias post-bell + 2 key support/resistance levels for the session main move",
+    }.get(SESSION, "One bold directional bias + 2 key watch levels")
+
+    raw = json.dumps(payload, indent=2, default=str)[:6000]
+
+    prompt = textwrap.dedent(f"""
+        You are a senior institutional trading analyst.
+        {intro}
+
+        RAW DATA:
+        {raw}
+
+        Ground every level you quote in the RAW DATA above. Derive key levels from
+        the prices actually present there - never carry over levels from memory or
+        from a previous session. If the data is insufficient for a field, say so in
+        that field rather than inventing numbers.
+
+        Field guidance:
+        - macro_summary      : 4 bullet points on key macro themes, each line prefixed with a bullet character
+        - overnight_analysis : {overnight_spec}
+        - gamma_regime       : 2 sentences on gamma regime + intraday vol implication
+        - cta_flow           : 2 sentences on CTA / systematic flow
+        - sentiment_read     : 2 sentences interpreting retail sentiment vs institutional bias
+        - session_bias       : {bias_spec}
+        - risk_events        : specific catalysts to watch today, as bullet lines
+        - tactical_framework : 4-5 short actionable rules for today, as bullet lines
+        - key_levels_nq / key_levels_es : numeric r1, r2, pivot, support1, support2
+    """).strip()
+
+    LEVELS = {
+        "type": "object",
+        "properties": {k: {"type": "number"} for k in
+                       ("r1", "r2", "pivot", "support1", "support2")},
+        "required": ["r1", "r2", "pivot", "support1", "support2"],
+        "additionalProperties": False,
+    }
+    TEXT_FIELDS = ["macro_summary", "overnight_analysis", "gamma_regime", "cta_flow",
+                   "sentiment_read", "session_bias", "risk_events", "tactical_framework"]
+    SCHEMA = {
+        "type": "object",
+        "properties": {**{f: {"type": "string"} for f in TEXT_FIELDS},
+                       "key_levels_nq": LEVELS, "key_levels_es": LEVELS},
+        "required": TEXT_FIELDS + ["key_levels_nq", "key_levels_es"],
+        "additionalProperties": False,
+    }
+
     try:
         client = _ant.Anthropic(api_key=ANTHROPIC_API_KEY)
         msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1800,
-            messages=[{
-                "role": "user",
-                "content": textwrap.dedent(f"""
-                    You are a senior institutional trading analyst.
-                    {
-                        "london": f"Prepare a concise London-open briefing for a US index day trader (instruments: NQ, ES, /MNQ, /MES; London session: 3AM–8AM ET, NY session follows 9:30AM ET; date: {DATE_DISPLAY}). Focus on overnight futures movement, London open momentum, and key levels for the 3:30–8:00 AM ET window.",
-                        "us": f"Prepare a concise pre-market briefing for a US index day trader (instruments: NQ, ES; pre-market: 7:55 AM ET; regular session: 9:30AM–4:00PM ET; date: {DATE_DISPLAY}).",
-                        "nyopen": f"Prepare a concise post-bell briefing for a US index day trader (instruments: NQ, ES; NY bell just rung 9:15 AM ET; session: 9:30AM–4:00PM ET; date: {DATE_DISPLAY}). Focus on opening momentum, market structure setup, and confirmed bias for the main session."
-                    }.get(SESSION, "")
-
-                    RAW DATA:
-                    {json.dumps(payload, indent=2, default=str)[:6000]}
-
-                    Return ONLY valid JSON (no markdown fences) with these string keys:
-                    - macro_summary      : 4 bullet points on key macro/geo themes (use \\n• prefix each)
-                    - overnight_analysis : {
-                        "london": "3 sentences on overnight NQ/ES narrative and London open momentum",
-                        "us": "3 sentences on overnight NQ/ES narrative",
-                        "nyopen": "3 sentences on opening 15-min action and NY session directional bias confirmation"
-                    }.get(SESSION, "")
-                    - gamma_regime       : 2 sentences on gamma regime + intraday vol implication
-                    - cta_flow           : 2 sentences on CTA/systematic flow
-                    - sentiment_read     : 2 sentences interpreting retail sentiment vs institutional bias
-                    - session_bias       : {
-                        "london": "One bold directional bias for London + early NY + 2 key watch levels",
-                        "us": "One bold directional bias + 2 key watch levels",
-                        "nyopen": "Confirmed directional bias post-bell + 2 key support/resistance levels for session main move"
-                    }.get(SESSION, "")
-                    - risk_events        : Specific catalysts to watch today (bullets)
-                    - key_levels_nq      : JSON object with keys: r1, r2, support1, support2, pivot (all numbers)
-                    - key_levels_es      : JSON object with keys: r1, r2, support1, support2, pivot (all numbers)
-                """).strip()
-            }]
+            model=NARRATIVE_MODEL,
+            max_tokens=8000,
+            output_config={"format": {"type": "json_schema", "schema": SCHEMA},
+                           "effort": "medium"},
+            messages=[{"role": "user", "content": prompt}],
         )
-        return json.loads(msg.content[0].text)
+        if msg.stop_reason == "refusal":
+            return {"_error": "model refused the request"}
+        text = next((b.text for b in msg.content if b.type == "text"), "")
+        if not text:
+            return {"_error": f"no text block (stop_reason={msg.stop_reason})"}
+        return json.loads(text)
     except Exception as e:
-        return {"_error": str(e)}
+        return {"_error": f"{type(e).__name__}: {e}"}
+
 
 
 # ── HTML Builder ──────────────────────────────────────────────────────────────
@@ -699,6 +774,7 @@ tr:hover td { background: rgba(255,255,255,0.03); }
 }
 .regime-neg  { background: rgba(248,113,113,0.15); color: var(--red);   border: 1px solid rgba(248,113,113,0.3); }
 .regime-pos  { background: rgba(74,222,128,0.15);  color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+.regime-neutral { background: rgba(251,191,36,0.15); color: var(--yellow); border: 1px solid rgba(251,191,36,0.3); }
 .menthorq-placeholder {
   color: var(--muted); font-size: 12px; font-style: italic;
   padding: 10px 0; text-align: center;
@@ -896,10 +972,26 @@ def _menthorq_section(mq):
     {vol_html}
     """
 
+UNAVAIL_HTML = ('<span class="neutral" style="color:#fbbf24">'
+                '&#9888; UNAVAILABLE &mdash; no live narrative this run '
+                '(set ANTHROPIC_API_KEY). Nothing is shown rather than stale text.'
+                '</span>')
+
+
 def _narrative_block(key, narrative, fallback=""):
-    val = narrative.get(key, fallback)
+    """Render a narrative section.
+
+    2026-07-31: previously this fell back to hardcoded static prose whenever the
+    AI narrative was missing (no ANTHROPIC_API_KEY). That silently published
+    months-old text as if it were today's read — on 2026-07-30 the page shipped
+    an Iran-oil-shock / "BEARISH sell rallies" call, with NQ pivot levels ~3,400
+    points below spot, on a day that closed +3.4% on the Nasdaq. A stale briefing
+    that looks live is worse than no briefing, so a missing narrative now fails
+    loud. The `fallback` arg is retained for call-site compatibility and ignored.
+    """
+    val = narrative.get(key)
     if not val:
-        return f'<span class="neutral">{fallback or "—"}</span>'
+        return UNAVAIL_HTML
     lines = [l.strip() for l in val.split("\n") if l.strip()]
     return "".join(
         f'<span class="bullet">{html.escape(l.lstrip("•").strip())}</span>'
@@ -944,24 +1036,54 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     vix_cls  = "up" if vix_pct >= 0 else "down"
 
     # ── Gamma regime badge ────────────────────────────────────────────────────
-    regime_label = "NEGATIVE GAMMA — Vol Amplifying"
-    regime_class = "regime-neg"
+    # Do NOT assert a gamma regime we have not measured. With MenthorQ down this
+    # badge used to claim "NEGATIVE GAMMA" every day regardless of the tape.
+    regime_label = "GAMMA REGIME UNAVAILABLE — no MenthorQ data"
+    regime_class = "regime-neutral"
     mq_ok = mq.get("status") == "ok" and mq.get("ok_count", 0) > 0
     if mq_ok:
         regime_label = "Live GEX — see MenthorQ charts"
         regime_class = "regime-pos"
 
-    # ── Key levels: use narrative if available, else static defaults ─────────
+    # ── Key levels: live narrative only. NEVER static ────────────────────────
+    # The old defaults (24858/24634/24400/23971/23800) were frozen from an early
+    # 2026 session and kept publishing while NQ traded ~28,100 — a 3,400-point
+    # error presented as today's pivot. Blank beats wrong.
     kl_nq = narrative.get("key_levels_nq") or {
-        "r2": 24858, "r1": 24634, "pivot": 24400, "support1": 23971, "support2": 23800
+        "r2": None, "r1": None, "pivot": None, "support1": None, "support2": None
     }
     kl_es = narrative.get("key_levels_es") or {
         "r2": None, "r1": None, "pivot": None, "support1": None, "support2": None
     }
 
-    # ── Bias ─────────────────────────────────────────────────────────────────
-    bias_text = narrative.get("session_bias", "BEARISH / Sell Rallies — Iran energy shock, negative gamma, CTA deleveraging active. Watch 24,400 NQ as pivot; break below targets 23,971.")
-    bias_cls  = _bias_class(bias_text)
+    # ── Bias: live narrative only. A stale directional call is the single most
+    #    dangerous thing this page can publish, so absence is stated explicitly.
+    narrative_ok = bool(narrative.get("session_bias"))
+    bias_text = narrative.get("session_bias") or (
+        "BIAS UNAVAILABLE — no live narrative generated this run. "
+        "Do not trade from this page today; the market snapshot above is live, "
+        "everything analytical is not.")
+    bias_cls  = _bias_class(bias_text) if narrative_ok else "neutral-b"
+
+    # ── Degraded-run banner ───────────────────────────────────────────────────
+    # Make a half-dead briefing impossible to mistake for a live one.
+    _missing = []
+    if not narrative_ok:
+        _missing.append("AI narrative (ANTHROPIC_API_KEY)")
+    if not mq_ok:
+        _missing.append("MenthorQ gamma / CTA data (MENTHORQ_PASSWORD)")
+    degraded_banner = ""
+    if _missing:
+        degraded_banner = (
+            '<div style="margin-bottom:12px;background:rgba(251,191,36,0.12);'
+            'border:1px solid rgba(251,191,36,0.45);border-radius:6px;padding:10px 14px;'
+            'font-size:12.5px;color:#fbbf24;line-height:1.6">'
+            '<b>&#9888; DEGRADED RUN &mdash; ANALYTICAL SECTIONS DISABLED.</b><br>'
+            'Missing: ' + html.escape(", ".join(_missing)) + '.<br>'
+            'The market snapshot and cross-asset quotes above are <b>live</b>. '
+            'Bias, key levels, gamma regime, CTA flow and tactical framework are '
+            '<b>blank by design</b> &mdash; this page no longer substitutes stale '
+            'placeholder text for missing data.</div>')
 
     # ── Market status banner ──────────────────────────────────────────────────
     mkt = mkt or {}
@@ -1001,6 +1123,7 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
 
 <!-- ── Market Status Banner ──────────────────────────────────────────────── -->
 <div style="margin-bottom:12px">{mkt_banner}</div>
+{degraded_banner}
 
 <!-- ── ROW 1: Market Snapshot + Fear/Greed + VIX ─────────────────────────── -->
 <div class="grid-3" style="margin-bottom:16px">
@@ -1015,7 +1138,8 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     <div class="gauge-wrap">
       <div>
         <div class="gauge-num" style="color:{fg_color}">{fg_val if fg_val else '—'}</div>
-        <div class="gauge-label">Fear & Greed</div>
+        <div class="gauge-label">Crypto Fear &amp; Greed</div>
+        <div style="font-size:9px;color:#8b949e;margin-top:2px">alternative.me &mdash; crypto, not equity</div>
         <div class="gauge-delta" style="color:{fg_color}">{fg_label}</div>
         <div class="gauge-delta neutral">{fg_delta}</div>
       </div>
@@ -1119,11 +1243,7 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     </div>
     <div style="margin-top:14px;font-size:11px;color:#8b949e">Tactical Framework</div>
     <div style="margin-top:6px;font-size:12px;line-height:1.8">
-      <span class="bullet">Sell VWAP reclaim failures on open (8–9:30AM)</span>
-      <span class="bullet">Iran ceasefire headline = immediate short cover</span>
-      <span class="bullet">VIX close &gt; 30 = flush/capitulation signal</span>
-      <span class="bullet">NQ 50-day MA reclaim = structural regime shift</span>
-      <span class="bullet">Do not fade moves without gamma support</span>
+      {_narrative_block("tactical_framework", narrative)}
     </div>
   </div>
 
@@ -1275,7 +1395,8 @@ def register_scheduled_task():
         ["schtasks", "/Create", "/TN", "DailyTradingBriefing",
          "/XML", str(xml_path), "/F"],
         capture_output=True, text=True
-    )
+    ,
+        creationflags=0x08000000)
     if result.returncode == 0:
         print("[OK] Scheduled task registered: DailyTradingBriefing @ 7:55 AM daily")
     else:
@@ -1430,9 +1551,19 @@ def main():
             "sentiment": {k: {"bull_pct": v.get("bull_pct"), "bear_pct": v.get("bear_pct")}
                           for k, v in st_symbols.items() if v},
         })
-        print("  [+] Narrative ready")
+        # Never claim success unconditionally — the old code printed "Narrative
+        # ready" even when generate_ai_narrative() had returned {"_error": ...},
+        # which is how a permanently-broken narrative went unnoticed.
+        if narrative.get("_error"):
+            print(f"  [!] NARRATIVE FAILED: {narrative['_error']}")
+            narrative = {}
+        elif narrative.get("session_bias"):
+            print(f"  [+] Narrative ready ({NARRATIVE_MODEL})")
+        else:
+            print("  [!] NARRATIVE EMPTY — no session_bias returned")
+            narrative = {}
     else:
-        print("  [i] No ANTHROPIC_API_KEY — using static narrative defaults")
+        print("  [i] No ANTHROPIC_API_KEY — analytical sections will render as UNAVAILABLE")
 
     # ── Build HTML ────────────────────────────────────────────────────────────
     page = build_html(
