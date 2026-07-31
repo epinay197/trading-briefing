@@ -1048,6 +1048,72 @@ def _key_levels_html(levels: dict):
     </table>"""
 
 
+def _playbook_html(gamma):
+    """The standing session playbook, with the one live decision resolved.
+
+    Shipped on every briefing because the rules are worth nothing if they have
+    to be recalled from memory at 09:30.
+    """
+    g = gamma or {}
+    ng = ((g.get("assets") or {}).get("SPX") or {}).get("net_gex")
+    if isinstance(ng, (int, float)):
+        if ng < 0:
+            verdict = ("NEGATIVE GAMMA &rarr; dealers AMPLIFY. Breaks work. "
+                       "Trade <b>through</b> levels, trail the stop. Do not fade.")
+            vcls, vnum = "regime-neg", f"SPX net GEX {ng/1e6:+.0f}M"
+        else:
+            verdict = ("POSITIVE GAMMA &rarr; dealers DAMPEN. Fades work. "
+                       "Trade <b>between</b> levels, take profit at the wall. Do not chase.")
+            vcls, vnum = "regime-pos", f"SPX net GEX {ng/1e6:+.0f}M"
+    else:
+        verdict = ("Gamma sign unavailable &mdash; treat as neutral and size down.")
+        vcls, vnum = "regime-neutral", "no reading"
+
+    clock = [("9:30&ndash;9:45", "Nothing. Let the range print."),
+             ("9:45&ndash;10:00", "Note which side of the pivot you are on. That is the bias."),
+             ("10:00&ndash;11:30", "<b>The only real trading window.</b> Long above pivot toward the call wall; short below toward the put wall. Stop on the far side of the level you entered from."),
+             ("11:30&ndash;13:30", "Flat. Lunch has no edge."),
+             ("13:30&ndash;15:00", "Second leg only if the morning made a clean high or low. If it chopped, stay out."),
+             ("15:00&ndash;15:45", "Pin window. Nearest wall pulls price in. The only tested edge here (PF 1.79)."),
+             ("15:45&ndash;16:00", "Flat.")]
+    rows = "".join(f'<tr><td style="white-space:nowrap">{t}</td><td>{w}</td></tr>' for t, w in clock)
+
+    return f"""
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div style="font-size:11px;color:#8b949e;margin-bottom:6px">The two layers</div>
+        <div style="font-size:12px;line-height:1.7">
+          <span class="bullet"><b>Map (fixed all day):</b> MenthorQ EOD levels, built from
+          settled open interest at yesterday's close. Open interest cannot change during the
+          session &mdash; these strikes do not move. They tell you <i>where</i> price reacts.</span>
+          <span class="bullet"><b>Weather (moves constantly):</b> live gamma on that same open
+          interest. Gamma reprices with spot, time and IV, so intensity swings hard even though
+          no strike moved. It tells you <i>how</i> price reacts when it gets there.</span>
+          <span class="bullet"><b>Blind spot:</b> today's 0DTE volume creates positioning that
+          does not reach open interest until tomorrow. Your only proxies are the gamma sign and
+          the put/call volume ratio.</span>
+        </div>
+        <div style="font-size:11px;color:#8b949e;margin:14px 0 6px">The one number &mdash; today</div>
+        <div class="regime-pill {vcls}">{vnum}</div>
+        <div style="font-size:12.5px;line-height:1.7;margin-top:8px">{verdict}</div>
+        <div style="font-size:11px;color:#8b949e;margin:14px 0 6px">Three rules</div>
+        <div style="font-size:12px;line-height:1.8">
+          <span class="bullet">Never trade against the gamma sign.</span>
+          <span class="bullet">The wall is the target, not the entry. Enter at the pivot, exit at the wall.</span>
+          <span class="bullet">Two losses = done for the session.</span>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:#8b949e;margin-bottom:6px">The day (ET)</div>
+        <table><tbody>{rows}</tbody></table>
+        <div style="font-size:10.5px;color:#8b949e;margin-top:10px;line-height:1.6">
+          For scalping do not read this page &mdash; put <code>ICT_GammaEdgeLevels</code> on the
+          ES/NQ chart. Same levels, refreshed every 5 minutes, plus SD-band touch probabilities.
+        </div>
+      </div>
+    </div>"""
+
+
 def _local_gamma_section(g):
     """Render gamma from NOKEPA + MenthorQ levels held locally."""
     if not g or not g.get("assets"):
@@ -1430,6 +1496,12 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     </div>
   </div>
 
+</div>
+
+<!-- ── ROW 3b: Session Playbook ───────────────────────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#60a5fa"></span>Session Playbook &mdash; how to trade the levels above</div>
+  {_playbook_html(gamma)}
 </div>
 
 <!-- ── ROW 4: Retail Sentiment ────────────────────────────────────────────── -->
