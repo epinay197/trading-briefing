@@ -740,11 +740,21 @@ def generate_ai_narrative(payload: dict) -> dict:
         - gamma_regime       : 2 sentences on gamma regime + intraday vol implication
         - cta_flow           : 2 sentences on CTA / systematic flow
         - sentiment_read     : 2 sentences interpreting retail sentiment vs institutional bias
-        - session_bias       : object. headline = one decisive sentence ({bias_spec}).
-          decisive_level = the single number the day turns on, cash and future.
-          above / below = what each side opens up, with targets. invalidation =
-          what kills the call. Keep every field to one or two sentences - this
-          renders as a compact card, not prose.
+        - session_bias       : object. Write it as INSTRUCTIONS a trader executes,
+          not as commentary. Imperative voice. No hedging, no restating context.
+            headline       : max 14 words. The stance and the one thing that decides it.
+                             e.g. "Long above 7505, short below it - the walls cap both sides."
+            decisive_level : ONLY the numbers, no sentence. Lead with the futures the
+                             user actually trades. e.g. "ES 7505  |  NQ 28285  |  SPX 7480 cash"
+            above          : the LONG plan in max 30 words, in this shape ->
+                             ENTRY (where you buy) / TARGET (first, then stretch) / STOP.
+                             e.g. "Buy pullbacks into 7505-7500. First target 7525,
+                             stretch 7571. Stop below 7495. Sell the first tag, do not chase."
+            below          : the SHORT plan, same 30-word shape, same ENTRY/TARGET/STOP.
+            invalidation   : max 25 words. The kill switch, price AND cross-asset.
+                             e.g. "Two 15-min closes under ES 7425, or 10Y above 4.75% - flat, no longs."
+          Never pack all six instruments into one sentence. Quote at most the two
+          futures plus one cash reference per field; the levels table holds the rest.
         - scenarios          : the 3 weighted scenarios described above
         - location_discipline: 2 sentences on where to enter and where not to
         - one_liner          : ONE panic-proof sentence a trader can hold in their
@@ -867,7 +877,7 @@ body {
   border: 1px solid var(--accent); color: var(--blue);
 }
 .tag-gen { font-size: 11px; color: var(--muted); margin-top: 4px; }
-.container { max-width: 1400px; margin: 0 auto; padding: 20px 24px; }
+.container { max-width: 1680px; margin: 0 auto; padding: 20px 24px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 .panel {
@@ -966,14 +976,27 @@ tr:hover td { background: rgba(255,255,255,0.03); }
 }
 .regime-neg  { background: rgba(248,113,113,0.15); color: var(--red);   border: 1px solid rgba(248,113,113,0.3); }
 .regime-pos  { background: rgba(74,222,128,0.15);  color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
-.bias-head { font-size:14px; font-weight:700; line-height:1.45; margin-bottom:12px; color:var(--text); }
-.bias-grid { width:100%; border-collapse:collapse; font-size:12px; }
-.bias-grid td { padding:7px 0; vertical-align:top; border-bottom:1px solid var(--border); line-height:1.55; }
-.bias-grid td:first-child { width:88px; color:var(--muted); font-size:10.5px; letter-spacing:.5px;
-  text-transform:uppercase; font-weight:600; white-space:nowrap; padding-right:12px; }
-.bias-grid tr:last-child td { border-bottom:none; }
-.bias-kill td { color:var(--red); }
-.oneliner { background:rgba(96,165,250,0.08); border:1px solid rgba(96,165,250,0.35);
+.bias-head { font-size:19px; font-weight:700; line-height:1.4; margin-bottom:14px; color:var(--text); }
+.bias-decisive { font-size:12px; color:var(--muted); letter-spacing:.5px; text-transform:uppercase;
+  font-weight:600; padding:10px 14px; background:rgba(255,255,255,0.03); border-radius:8px;
+  border:1px solid var(--border); margin-bottom:14px; }
+.bias-decisive b { color:var(--yellow); font-size:15px; letter-spacing:0; text-transform:none;
+  margin-left:10px; font-weight:700; }
+.bias-split { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+.bias-side { border-radius:8px; padding:14px 16px; font-size:14px; line-height:1.65; }
+.bias-side.up { background:rgba(74,222,128,0.07); border:1px solid rgba(74,222,128,0.28); }
+.bias-side.dn { background:rgba(248,113,113,0.07); border:1px solid rgba(248,113,113,0.28); }
+.bias-side-h { font-size:12px; font-weight:800; letter-spacing:.7px; text-transform:uppercase;
+  margin-bottom:8px; }
+.bias-side.up .bias-side-h { color:var(--green); }
+.bias-side.dn .bias-side-h { color:var(--red); }
+.bias-killbar { background:rgba(248,113,113,0.10); border:1px solid rgba(248,113,113,0.35);
+  border-left:3px solid var(--red); border-radius:8px; padding:12px 16px; font-size:13.5px;
+  line-height:1.6; color:var(--text); }
+.bias-killbar b { color:var(--red); font-size:11px; letter-spacing:.7px; text-transform:uppercase;
+  display:block; margin-bottom:4px; }
+@media (max-width: 900px) { .bias-split { grid-template-columns:1fr; } }
+.oneliner { font-size:15px; background:rgba(96,165,250,0.08); border:1px solid rgba(96,165,250,0.35);
   border-left:3px solid var(--blue); border-radius:8px; padding:12px 16px; margin-bottom:16px;
   font-size:13.5px; line-height:1.6; color:var(--text); }
 .oneliner b { color:var(--blue); font-size:10.5px; letter-spacing:.6px; text-transform:uppercase;
@@ -1158,21 +1181,23 @@ def _key_levels_html(levels: dict):
 
 
 def _bias_card(bias, cls):
-    """Compact labelled card. The old version dumped one long paragraph into a
-    narrow column, which read as a wall of text."""
+    """Full-width trade plan: headline, the decisive number, the two sides side
+    by side, then the kill switch. Replaces a stacked label/value table that
+    wrapped into an unreadable column."""
     if not isinstance(bias, dict) or not bias.get("headline"):
-        return (f'<div class="bias-box {cls}">'
-                'BIAS UNAVAILABLE — no live narrative generated this run. '
-                'Do not trade from this page today.</div>')
-    rows = ""
-    for label, key, extra in (("Decisive", "decisive_level", ""), ("Above", "above", ""),
-                              ("Below", "below", ""), ("Invalidation", "invalidation", " class=\"bias-kill\"")):
-        v = bias.get(key)
-        if v:
-            rows += f'<tr{extra}><td>{label}</td><td>{html.escape(str(v))}</td></tr>'
-    return (f'<div class="bias-box {cls}">'
-            f'<div class="bias-head">{html.escape(str(bias["headline"]))}</div>'
-            f'<table class="bias-grid"><tbody>{rows}</tbody></table></div>')
+        return ('<div class="bias-box neutral-b">BIAS UNAVAILABLE — no live narrative '
+                'generated this run. Do not trade from this page today.</div>')
+    e = lambda k: html.escape(str(bias.get(k) or ""))
+    dec = (f'<div class="bias-decisive">Decisive level<b>{e("decisive_level")}</b></div>'
+           if bias.get("decisive_level") else "")
+    kill = (f'<div class="bias-killbar"><b>&#9940; Invalidation &mdash; kill switch</b>'
+            f'{e("invalidation")}</div>' if bias.get("invalidation") else "")
+    return (f'<div class="bias-box {cls}" style="padding:18px 20px">'
+            f'<div class="bias-head">{e("headline")}</div>{dec}'
+            f'<div class="bias-split">'
+            f'<div class="bias-side up"><div class="bias-side-h">&#9650; Above &mdash; long plan</div>{e("above")}</div>'
+            f'<div class="bias-side dn"><div class="bias-side-h">&#9660; Below &mdash; short plan</div>{e("below")}</div>'
+            f'</div>{kill}</div>')
 
 
 def _scenarios_html(scns):
@@ -1527,7 +1552,67 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
 {degraded_banner}
 {oneliner_html}
 
-<!-- ── ROW 1: Market Snapshot + Fear/Greed + VIX ─────────────────────────── -->
+<!-- ── ROW A: TRADE PLAN (top of page, full width) ────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#4ade80"></span>Session Bias &mdash; the trade plan</div>
+  {bias_card}
+  <div class="grid-2" style="margin-top:16px">
+    <div>
+      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">Tactical framework</div>
+      <div style="font-size:13px;line-height:1.8">{_narrative_block("tactical_framework", narrative)}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">Location discipline &mdash; where to enter, where not to</div>
+      <div style="font-size:13px;line-height:1.7">{_narrative_block("location_discipline", narrative)}</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── ROW 3a: Scenarios ──────────────────────────────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#c084fc"></span>Scenarios &mdash; weighted, most likely first</div>
+  {scenarios_html}
+</div>
+
+<!-- ── ROW C: Key Levels + Gamma (wide, side by side) ─────────────────────── -->
+<div class="grid-2" style="margin-bottom:16px">
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#fbbf24"></span>Key Levels &mdash; Index Complex</div>
+    {_key_levels_html(kl_all)}
+    <div style="margin-top:10px;font-size:11px;color:#8b949e">
+      <span class="levels-chip chip-r">R</span> Resistance &nbsp;
+      <span class="levels-chip chip-p">P</span> Pivot &nbsp;
+      <span class="levels-chip chip-s">S</span> Support
+      &nbsp;&middot;&nbsp; fixed for the session (built from settled open interest)
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#f87171"></span>Gamma / Options Regime (SPX)</div>
+    {_local_gamma_section(gamma)}
+    {_narrative_block("gamma_regime", narrative,
+        "SPX is operating in negative gamma — dealers are net short gamma and must sell ES futures on declines, amplifying down-moves. "
+        "SPX Volatility Trigger ~6,900 is overhead resistance; reclaim needed for regime shift. VIX testing but not closing above 30."
+    )}
+    <div style="margin-top:12px">
+      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">
+        Gamma and levels sourced from local engines (NOKEPA + MenthorQ via CDP).
+        The legacy menthorq.com WordPress scrape was retired 2026-07-31 &mdash;
+        MenthorQ now lives at dashboard.menthorq.io.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── ROW 3b: Session Playbook ───────────────────────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#60a5fa"></span>Session Playbook &mdash; how to trade the levels above</div>
+  {_playbook_html(gamma)}
+</div>
+
+<!-- ── ROW E: Market Snapshot + Fear/Greed + VIX ──────────────────────────── -->
 <div class="grid-3" style="margin-bottom:16px">
 
   <div class="panel" style="grid-column: span 2">
@@ -1602,67 +1687,10 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
 
 </div>
 
-<!-- ── ROW 3: Gamma + Key Levels + Session Bias ───────────────────────────── -->
-<div class="grid-3" style="margin-bottom:16px">
-
-  <div class="panel">
-    <div class="panel-title"><span class="dot" style="background:#f87171"></span>Gamma / Options Regime (SPX)</div>
-    {_local_gamma_section(gamma)}
-    {_narrative_block("gamma_regime", narrative,
-        "SPX is operating in negative gamma — dealers are net short gamma and must sell ES futures on declines, amplifying down-moves. "
-        "SPX Volatility Trigger ~6,900 is overhead resistance; reclaim needed for regime shift. VIX testing but not closing above 30."
-    )}
-    <div style="margin-top:12px">
-      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">
-        Gamma and levels sourced from local engines (NOKEPA + MenthorQ via CDP).
-        The legacy menthorq.com WordPress scrape was retired 2026-07-31 &mdash;
-        MenthorQ now lives at dashboard.menthorq.io.
-      </div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-title"><span class="dot" style="background:#fbbf24"></span>Key Levels — Index Complex</div>
-    {_key_levels_html(kl_all)}
-    <div style="margin-top:10px;font-size:11px;color:#8b949e">
-      <span class="levels-chip chip-r">R</span> Resistance &nbsp;
-      <span class="levels-chip chip-p">P</span> Pivot &nbsp;
-      <span class="levels-chip chip-s">S</span> Support
-    </div>
-    <div class="section-divider"></div>
-    <div style="font-size:11px;color:#8b949e;margin-bottom:6px">Sentiment Read</div>
-    {_narrative_block("sentiment_read", narrative,
-        "Retail StockTwits sentiment predominantly bearish on ES/SPY, contrarian signals absent. "
-        "WSB chatter dominated by put positioning and oil plays — aligned with institutional flow. "
-        "No meaningful dip-buying conviction visible in retail community."
-    )}
-  </div>
-
-  <div class="panel">
-    <div class="panel-title"><span class="dot" style="background:#4ade80"></span>Session Bias</div>
-    {bias_card}
-    <div style="margin-top:14px;font-size:11px;color:#8b949e">Tactical Framework</div>
-    <div style="margin-top:6px;font-size:12px;line-height:1.8">
-      {_narrative_block("tactical_framework", narrative)}
-    </div>
-    <div style="margin-top:12px;font-size:11px;color:#8b949e">Location discipline</div>
-    <div style="margin-top:4px;font-size:12px;line-height:1.65">
-      {_narrative_block("location_discipline", narrative)}
-    </div>
-  </div>
-
-</div>
-
-<!-- ── ROW 3a: Scenarios ──────────────────────────────────────────────────── -->
+<!-- ── ROW D2: Sentiment read ─────────────────────────────────────────────── -->
 <div class="panel" style="margin-bottom:16px">
-  <div class="panel-title"><span class="dot" style="background:#c084fc"></span>Scenarios &mdash; weighted, most likely first</div>
-  {scenarios_html}
-</div>
-
-<!-- ── ROW 3b: Session Playbook ───────────────────────────────────────────── -->
-<div class="panel" style="margin-bottom:16px">
-  <div class="panel-title"><span class="dot" style="background:#60a5fa"></span>Session Playbook &mdash; how to trade the levels above</div>
-  {_playbook_html(gamma)}
+  <div class="panel-title"><span class="dot" style="background:#8b949e"></span>Sentiment read</div>
+  <div style="font-size:13px;line-height:1.7">{_narrative_block("sentiment_read", narrative)}</div>
 </div>
 
 <!-- ── ROW 4: Retail Sentiment ────────────────────────────────────────────── -->
