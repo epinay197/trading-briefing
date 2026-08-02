@@ -15,7 +15,7 @@ Environment variables (set via Claude Code settings or shell profile):
 """
 
 # ── Bootstrap dependencies ────────────────────────────────────────────────────
-import subprocess, sys
+import subprocess, sys, time, re
 
 def _pip(*pkgs):
     subprocess.check_call([sys.executable, "-m", "pip", "install", *pkgs, "-q", "--quiet"], creationflags=0x08000000)
@@ -653,6 +653,30 @@ def fetch_local_gamma() -> dict:
     except Exception as e:
         out["ym_err"] = f"{type(e).__name__}: {e}"
 
+    # NOKEPA is session-gated (14:00-22:30 LU), so the London run at 09:30 and any
+    # weekend run find it down and gex_cache carries levels but no net GEX. Keep a
+    # snapshot of the last good dealer figures and fall back to it, clearly aged,
+    # rather than blanking the regime and flagging the whole run degraded.
+    SNAP = Path(__file__).resolve().parent / "data" / "last_gamma.json"
+    _have_live = any((r or {}).get("net_gex") is not None for r in out["assets"].values())
+    try:
+        if _have_live:
+            SNAP.parent.mkdir(exist_ok=True)
+            SNAP.write_text(json.dumps({"ts": time.time(), "assets": out["assets"]},
+                                       default=str), encoding="utf-8")
+        elif SNAP.exists():
+            snap = json.loads(SNAP.read_text(encoding="utf-8"))
+            age_h = (time.time() - float(snap.get("ts", 0))) / 3600.0
+            for a, rec in (snap.get("assets") or {}).items():
+                if a in out["assets"]:
+                    for k, v in (rec or {}).items():
+                        if out["assets"][a].get(k) is None and v is not None:
+                            out["assets"][a][k] = v
+            out["gamma_age_h"] = round(age_h, 1)
+            out["source"] = "nokepa-snapshot"
+    except Exception as e:
+        out["snap_err"] = f"{type(e).__name__}: {e}"
+
     try:
         mq = json.loads((NOKEPA_DIR / "data" / "mq_levels.json").read_text(encoding="utf-8"))
         out["mq"] = mq.get("levels", {})
@@ -771,18 +795,23 @@ def generate_ai_narrative(payload: dict) -> dict:
         - session_bias       : object. Write it as INSTRUCTIONS a trader executes,
           not as commentary. Imperative voice. No hedging, no restating context.
             headline       : max 14 words. The stance and the one thing that decides it.
-                             e.g. "Long above 7505, short below it - the walls cap both sides."
-            decisive_level : ONLY the numbers, no sentence. Lead with the futures the
-                             user actually trades. e.g. "ES 7505  |  NQ 28285  |  SPX 7480 cash"
-            above          : the LONG plan in max 30 words, in this shape ->
-                             ENTRY (where you buy) / TARGET (first, then stretch) / STOP.
-                             e.g. "Buy pullbacks into 7505-7500. First target 7525,
-                             stretch 7571. Stop below 7495. Sell the first tag, do not chase."
-            below          : the SHORT plan, same 30-word shape, same ENTRY/TARGET/STOP.
+            decisive_level : ONLY numbers, all four instruments, no sentence. e.g.
+                             "ES 7520 | NQ 28405 | YM 52500 | SPX 7499 cash"
+            above          : the LONG plan, ONE LINE PER INSTRUMENT separated by
+                             newlines, each starting with the symbol and a colon,
+                             in the order ES, NQ, YM, SPX. Max 16 words per line,
+                             shape ENTRY -> TARGET (stretch) / STOP. Exactly:
+                             "ES: Buy 7520-7512 -> 7550, stretch 7572. Stop 7505.
+                              NQ: Buy 28405-28380 -> 28650. Stop 28340.
+                              YM: Buy 52500-52440 -> 52772. Stop 52380.
+                              SPX: Buy 7499-7492 -> 7530. Stop 7485."
+            below          : the SHORT plan, same four lines, same shape.
             invalidation   : max 25 words. The kill switch, price AND cross-asset.
-                             e.g. "Two 15-min closes under ES 7425, or 10Y above 4.75% - flat, no longs."
-          Never pack all six instruments into one sentence. Quote at most the two
-          futures plus one cash reference per field; the levels table holds the rest.
+          Every instrument gets its own line - never merge them into one sentence.
+          YM levels come from dow_map and are already futures-adjusted. Judge it
+          ONLY by dow_map._confidence: quote the levels normally at "good" or
+          "fair". A null support2/r2 means one side had fewer clusters, NOT that
+          the map is broken - quote what is there. Decline only at "low".
         - scenarios          : the 3 weighted scenarios described above
         - location_discipline: 2 sentences on where to enter and where not to
         - one_liner          : ONE panic-proof sentence a trader can hold in their
@@ -1018,6 +1047,10 @@ tr:hover td { background: rgba(255,255,255,0.03); }
   margin-bottom:8px; }
 .bias-side.up .bias-side-h { color:var(--green); }
 .bias-side.dn .bias-side-h { color:var(--red); }
+.legs { width:100%; border-collapse:collapse; font-size:13.5px; }
+.legs td { padding:5px 0; vertical-align:top; line-height:1.55; }
+.legs .lg-sym { width:46px; font-weight:800; font-size:11.5px; letter-spacing:.5px;
+  opacity:.85; padding-right:10px; white-space:nowrap; }
 .bias-killbar { background:rgba(248,113,113,0.10); border:1px solid rgba(248,113,113,0.35);
   border-left:3px solid var(--red); border-radius:8px; padding:12px 16px; font-size:13.5px;
   line-height:1.6; color:var(--text); }
@@ -1216,6 +1249,25 @@ def _bias_card(bias, cls):
         return ('<div class="bias-box neutral-b">BIAS UNAVAILABLE — no live narrative '
                 'generated this run. Do not trade from this page today.</div>')
     e = lambda k: html.escape(str(bias.get(k) or ""))
+
+    def side(key, cls, title):
+        raw = str(bias.get(key) or "")
+        rows = ""
+        for ln in raw.splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            m = re.match(r"^(ES|NQ|YM|SPX|NDX|SPY|QQQ)\s*[:\-]\s*(.+)$", ln, re.I)
+            if m:
+                rows += (f'<tr><td class="lg-sym">{m.group(1).upper()}</td>'
+                         f'<td>{html.escape(m.group(2).strip())}</td></tr>')
+            else:
+                rows += f'<tr><td class="lg-sym"></td><td>{html.escape(ln)}</td></tr>'
+        body = (f'<table class="legs"><tbody>{rows}</tbody></table>' if rows
+                else html.escape(raw))
+        return (f'<div class="bias-side {cls}"><div class="bias-side-h">{title}</div>'
+                f'{body}</div>')
+
     dec = (f'<div class="bias-decisive">Decisive level<b>{e("decisive_level")}</b></div>'
            if bias.get("decisive_level") else "")
     kill = (f'<div class="bias-killbar"><b>&#9940; Invalidation &mdash; kill switch</b>'
@@ -1223,9 +1275,9 @@ def _bias_card(bias, cls):
     return (f'<div class="bias-box {cls}" style="padding:18px 20px">'
             f'<div class="bias-head">{e("headline")}</div>{dec}'
             f'<div class="bias-split">'
-            f'<div class="bias-side up"><div class="bias-side-h">&#9650; Above &mdash; long plan</div>{e("above")}</div>'
-            f'<div class="bias-side dn"><div class="bias-side-h">&#9660; Below &mdash; short plan</div>{e("below")}</div>'
-            f'</div>{kill}</div>')
+            + side("above", "up", "&#9650; Above &mdash; long plan")
+            + side("below", "dn", "&#9660; Below &mdash; short plan")
+            + f'</div>{kill}</div>')
 
 
 def _scenarios_html(scns):
@@ -1348,7 +1400,12 @@ def _local_gamma_section(g):
                  f"<td>{num(m.get('put_support_0dte'))}</td>"
                  f"<td>{num(m.get('min_1d'))}&ndash;{num(m.get('max_1d'))}</td></tr>")
 
-    src = "NOKEPA live (:8780)" if g.get("source") == "nokepa-live" else "NOKEPA cached snapshot"
+    if g.get("source") == "nokepa-live":
+        src = "NOKEPA live (:8780)"
+    elif g.get("source") == "nokepa-snapshot":
+        src = f"NOKEPA snapshot, {g.get('gamma_age_h')}h old (server session-gated off)"
+    else:
+        src = "NOKEPA cached levels (no live dealer figures)"
     mqs = f"MenthorQ levels {g.get('mq_fetched_at') or 'n/a'}" if g.get("mq") else "MenthorQ levels unavailable"
     return f"""
     <table>
@@ -1476,10 +1533,12 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     _ng = _spx.get("net_gex")
     if isinstance(_ng, (int, float)):
         if _ng < 0:
-            regime_label = f"NEGATIVE GAMMA — vol amplifying (SPX net GEX {_ng/1e6:+.0f}M)"
+            _age = f", {gamma.get('gamma_age_h')}h old" if gamma.get("gamma_age_h") else ""
+            regime_label = f"NEGATIVE GAMMA — vol amplifying (SPX net GEX {_ng/1e6:+.0f}M{_age})"
             regime_class = "regime-neg"
         else:
-            regime_label = f"POSITIVE GAMMA — vol dampening (SPX net GEX {_ng/1e6:+.0f}M)"
+            _age = f", {gamma.get('gamma_age_h')}h old" if gamma.get("gamma_age_h") else ""
+            regime_label = f"POSITIVE GAMMA — vol dampening (SPX net GEX {_ng/1e6:+.0f}M{_age})"
             regime_class = "regime-pos"
     else:
         regime_label = "GAMMA REGIME UNAVAILABLE — local engine unreachable"
