@@ -125,7 +125,7 @@ def main() -> int:
         return 4
 
     # Refuse to publish a briefing whose analytical half is dead.
-    if "NARRATIVE FAILED" in out or "NARRATIVE EMPTY" in out:
+    if any(m in out for m in ("NARRATIVE FAILED", "NARRATIVE EMPTY", "NARRATIVE INCOMPLETE")):
         log("ABORT: narrative failed — not committing a DEGRADED page. "
             "Local docs/ left dirty for inspection.")
         return 5

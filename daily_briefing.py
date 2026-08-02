@@ -642,6 +642,17 @@ def fetch_local_gamma() -> dict:
                 rec["cache_err"] = type(ex).__name__
         out["assets"][a] = rec
 
+    # Dow: no usable index-level chain (DJX/DIA are too thin), so the map is
+    # built bottom-up from the price-weighted components — see nokepa/app/dow.py.
+    try:
+        import sys as _sys
+        if str(NOKEPA_DIR) not in _sys.path:
+            _sys.path.insert(0, str(NOKEPA_DIR))
+        from app import dow as _dow
+        out["ym"] = _dow.ym_levels()
+    except Exception as e:
+        out["ym_err"] = f"{type(e).__name__}: {e}"
+
     try:
         mq = json.loads((NOKEPA_DIR / "data" / "mq_levels.json").read_text(encoding="utf-8"))
         out["mq"] = mq.get("levels", {})
@@ -702,6 +713,23 @@ def generate_ai_narrative(payload: dict) -> dict:
 
         Ground every level you quote in the RAW DATA above. Never carry over levels
         from memory or from a previous session.
+
+        THE DOW (YM) IS DIFFERENT - read this before writing its levels.
+        DJX and DIA options are too thin to build a dealer map from, so
+        `dow_map` in the RAW DATA is built BOTTOM-UP from the index's
+        price-weighted components. The Dow moves the same number of points per
+        dollar for every name (points_per_dollar), so a component's gamma wall
+        converts to a Dow level by arithmetic:
+            dow_level = djia + (strike - component_price) * points_per_dollar
+        Each level carries `n_names` and `weight_pct` - how many components and
+        what share of index weight sit behind it. Rank by THAT, not by nearness
+        to price: a 9-name / 51% level is structure, a 1-name / 4% level is one
+        stock's opinion and should be named as such. Levels are already
+        expressed as YM futures (cash + basis). If `_confidence` is "low", say
+        the Dow map is unreliable today instead of quoting levels.
+        Note the Dow's real risk: it is 30 names, so ONE high-priced component
+        gapping on single-stock news can move it independently of ES/NQ. Call
+        that out when the top-weighted names are the story.
 
         LEVEL DERIVATION - this is the important part. The RAW DATA carries
         `dealer_gamma` (per-asset net GEX, gamma flip, call wall, put wall from
@@ -802,7 +830,7 @@ def generate_ai_narrative(payload: dict) -> dict:
         "required": ["name", "probability", "trigger", "path", "invalidation"],
         "additionalProperties": False,
     }
-    LEVEL_SYMS = ["nq", "es", "spx", "ndx", "spy", "qqq"]
+    LEVEL_SYMS = ["nq", "es", "spx", "ndx", "spy", "qqq", "ym"]
     LEVEL_KEYS = [f"key_levels_{x}" for x in LEVEL_SYMS]
     SCHEMA = {
         "type": "object",
@@ -1152,8 +1180,8 @@ def _build_wsb_rows(posts):
 def _key_levels_html(levels: dict):
     """Rows = instrument, columns = level. Transposed from the old NQ/ES-only
     layout so the full complex (futures + cash + ETFs) fits without 7 columns."""
-    order = [("NQ", "NQ"), ("ES", "ES"), ("SPX", "SPX"), ("NDX", "NDX"),
-             ("SPY", "SPY"), ("QQQ", "QQQ")]
+    order = [("NQ", "NQ"), ("ES", "ES"), ("YM", "YM"), ("SPX", "SPX"),
+             ("NDX", "NDX"), ("SPY", "SPY"), ("QQQ", "QQQ")]
     cols = [("support2", "s"), ("support1", "s"), ("pivot", "p"),
             ("r1", "r"), ("r2", "r")]
 
@@ -1476,9 +1504,13 @@ def build_html(futures, fg, st_symbols, st_trending, wsb, mq, narrative, mkt=Non
     # Narrative levels win; real MenthorQ levels on disk are the fallback so the
     # table still populates when the model omits a symbol.
     kl_all = {}
-    for _sym in ("NQ", "ES", "SPX", "NDX", "SPY", "QQQ"):
+    for _sym in ("NQ", "ES", "YM", "SPX", "NDX", "SPY", "QQQ"):
         kl_all[_sym] = (narrative.get(f"key_levels_{_sym.lower()}")
                         or _mq_kl(_sym) or {})
+    # YM has no MenthorQ feed; the component-derived map is its fallback.
+    if not any(kl_all["YM"].get(k) for k in ("r1", "r2", "pivot", "support1", "support2")):
+        _y = gamma.get("ym") or {}
+        kl_all["YM"] = {k: _y.get(k) for k in ("r2", "r1", "pivot", "support1", "support2")}
 
     # ── Bias: live narrative only. A stale directional call is the single most
     #    dangerous thing this page can publish, so absence is stated explicitly.
@@ -2002,6 +2034,7 @@ def main():
                           for k, v in st_symbols.items() if v},
             "dealer_gamma": _g.get("assets", {}),
             "menthorq_levels": _g.get("mq", {}),
+            "dow_map": _g.get("ym", {}),
         })
         # Never claim success unconditionally — the old code printed "Narrative
         # ready" even when generate_ai_narrative() had returned {"_error": ...},
@@ -2009,11 +2042,25 @@ def main():
         if narrative.get("_error"):
             print(f"  [!] NARRATIVE FAILED: {narrative['_error']}")
             narrative = {}
-        elif narrative.get("session_bias"):
-            print(f"  [+] Narrative ready ({NARRATIVE_MODEL})")
         else:
-            print("  [!] NARRATIVE EMPTY — no session_bias returned")
-            narrative = {}
+            # Validate EXACTLY what the renderer requires. These drifted apart:
+            # the caller accepted any truthy session_bias while the renderer
+            # demanded a dict carrying a headline, so a partial response logged
+            # "Narrative ready" and then published a BIAS UNAVAILABLE page.
+            _b = narrative.get("session_bias")
+            _missing_keys = []
+            if not (isinstance(_b, dict) and _b.get("headline")):
+                _missing_keys.append("session_bias.headline")
+            for _k in ("nq", "es", "ym", "spx", "ndx", "spy", "qqq"):
+                if not narrative.get(f"key_levels_{_k}"):
+                    _missing_keys.append(f"key_levels_{_k}")
+            if not narrative.get("scenarios"):
+                _missing_keys.append("scenarios")
+            if _missing_keys:
+                print(f"  [!] NARRATIVE INCOMPLETE — missing {', '.join(_missing_keys)}")
+                narrative = {}
+            else:
+                print(f"  [+] Narrative ready ({NARRATIVE_MODEL})")
     else:
         print("  [i] No ANTHROPIC_API_KEY — analytical sections will render as UNAVAILABLE")
 
