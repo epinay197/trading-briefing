@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -96,6 +97,19 @@ def main() -> int:
     except Exception:
         cdp = False
         log("WARN: Chrome CDP :9222 unreachable — MenthorQ levels will be stale")
+
+    # The MenthorQ refresh costs ~3m20s — 64% of total runtime — and was pushing
+    # content past the moment it is needed (2026-08-03: 15:15 trigger, page live
+    # 15:20, ten minutes before the bell). A dedicated ICT_MQ_Refresh task now
+    # runs it ahead of each briefing, so skip it here when the file is already
+    # fresh and complete. --force-mq overrides.
+    try:
+        _age_s = time.time() - MQ_JSON.stat().st_mtime
+    except OSError:
+        _age_s = 1e9
+    if cdp and _age_s < 2100 and "--force-mq" not in sys.argv and not (WANT - _mq_syms()):
+        log(f"mq levels: fresh ({_age_s/60:.0f} min old, {len(_mq_syms())} syms) — skipping refresh")
+        cdp = False
 
     if cdp:
         for attempt in (1, 2):
