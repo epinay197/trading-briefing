@@ -148,15 +148,30 @@ def main() -> int:
         if p.returncode != 0:
             log("push rejected — rebasing onto origin/main and retrying")
             run(["git", "fetch", "origin"], timeout=300)
-            rb = run(["git", "-c", "core.editor=true", "rebase", "origin/main"], timeout=300)
+            # --autostash is required: the wrapper commits only docs/, so an
+            # edited daily_briefing.py leaves the tree dirty and plain rebase
+            # refuses with "cannot rebase: you have unstaged changes" — a
+            # failure with ZERO conflicts, so the handler below found nothing
+            # to resolve and the retry push failed again (2026-08-03 13:55 US
+            # run, rc=6, briefing generated but never published).
+            rb = run(["git", "-c", "core.editor=true", "rebase", "--autostash",
+                      "origin/main"], timeout=300)
             if rb.returncode != 0:
                 conflicts = run(["git", "diff", "--name-only", "--diff-filter=U"])
                 files = [f for f in conflicts.stdout.split("\n") if f.strip()]
                 for f in files:
                     run(["git", "checkout", "--theirs", "--", f])
                     run(["git", "add", f])
-                log(f"resolved {len(files)} conflict(s) in favour of the local build")
-                run(["git", "-c", "core.editor=true", "rebase", "--continue"], timeout=300)
+                if files:
+                    log(f"resolved {len(files)} conflict(s) in favour of the local build")
+                    run(["git", "-c", "core.editor=true", "rebase", "--continue"], timeout=300)
+                else:
+                    # Rebase failed for a reason other than a merge conflict.
+                    # Abort rather than sit detached mid-rebase, and log the
+                    # real git error — a silent no-op here loses a briefing.
+                    log("rebase failed, no conflicts to resolve: "
+                        + (rb.stdout + rb.stderr).strip()[:200])
+                    run(["git", "rebase", "--abort"], timeout=120)
             p = run(["git", "push", "origin", "main"], timeout=300)
         log(f"push rc={p.returncode} {(p.stdout + p.stderr).strip()[:160]}")
         if p.returncode != 0:
