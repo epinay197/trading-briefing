@@ -722,7 +722,13 @@ def generate_ai_narrative(payload: dict) -> dict:
         "nyopen": "Confirmed directional bias post-bell for the session main move. " + _cover,
     }.get(SESSION, "One bold directional bias. " + _cover)
 
-    raw = json.dumps(payload, indent=2, default=str)[:6000]
+    # 6000 chars truncated the payload mid-JSON: dow_map sorted last, so its tail
+    # was sliced off and the model reported "dow_map absent from the feed" while
+    # the map was present and healthy. The model has a 1M window; the cap exists
+    # only to bound a runaway payload, so it sits far above any real one.
+    raw = json.dumps(payload, indent=2, default=str)
+    if len(raw) > 40000:
+        raw = raw[:40000] + chr(10) + "... [payload truncated]"
     from zoneinfo import ZoneInfo as _Z
     _n = datetime.now(_Z("America/New_York"))
     _now_et = _n.strftime("%H:%M")
@@ -795,17 +801,23 @@ def generate_ai_narrative(payload: dict) -> dict:
         - session_bias       : object. Write it as INSTRUCTIONS a trader executes,
           not as commentary. Imperative voice. No hedging, no restating context.
             headline       : max 14 words. The stance and the one thing that decides it.
-            decisive_level : ONLY numbers, all four instruments, no sentence. e.g.
-                             "ES 7520 | NQ 28405 | YM 52500 | SPX 7499 cash"
+            decisive_level : ONLY numbers, all SIX instruments, no sentence. Futures
+                             first, then cash, then the ETF pair. e.g.
+                             "ES 7520 | NQ 28405 | YM 52500 | SPX 7499 | SPY 745.2 | QQQ 684.8"
             above          : the LONG plan, ONE LINE PER INSTRUMENT separated by
                              newlines, each starting with the symbol and a colon,
-                             in the order ES, NQ, YM, SPX. Max 16 words per line,
-                             shape ENTRY -> TARGET (stretch) / STOP. Exactly:
+                             in the order ES, NQ, YM, SPX, SPY, QQQ. Max 16 words
+                             per line, shape ENTRY -> TARGET (stretch) / STOP:
                              "ES: Buy 7520-7512 -> 7550, stretch 7572. Stop 7505.
                               NQ: Buy 28405-28380 -> 28650. Stop 28340.
                               YM: Buy 52500-52440 -> 52772. Stop 52380.
-                              SPX: Buy 7499-7492 -> 7530. Stop 7485."
-            below          : the SHORT plan, same four lines, same shape.
+                              SPX: Buy 7499-7492 -> 7530. Stop 7485.
+                              SPY: Buy 745.0-744.2 -> 749.5. Stop 743.4.
+                              QQQ: Buy 684.5-683.6 -> 690.0. Stop 682.4."
+                             SPY/QQQ carry two decimals - they are the execution
+                             vehicle for anyone trading shares or ETF options, so
+                             the levels must be precise enough to work an order.
+            below          : the SHORT plan, same six lines, same shape.
             invalidation   : max 25 words. The kill switch, price AND cross-asset.
           Every instrument gets its own line - never merge them into one sentence.
           YM levels come from dow_map and are already futures-adjusted. Judge it
@@ -813,6 +825,10 @@ def generate_ai_narrative(payload: dict) -> dict:
           "fair". A null support2/r2 means one side had fewer clusters, NOT that
           the map is broken - quote what is there. Decline only at "low".
         - scenarios          : the 3 weighted scenarios described above
+        - tactical_framework : 4-5 bullet rules for today. At least one MUST cover
+          the ETF pair (SPY/QQQ) explicitly - they are the retail execution
+          vehicle and where 0DTE flow concentrates, so a framework that only
+          talks futures is unusable for anyone trading shares or ETF options.
         - location_discipline: 2 sentences on where to enter and where not to
         - one_liner          : ONE panic-proof sentence a trader can hold in their
           head all session. The decisive level, both directions, the kill switch.
@@ -2092,8 +2108,13 @@ def main():
             "sentiment": {k: {"bull_pct": v.get("bull_pct"), "bear_pct": v.get("bear_pct")}
                           for k, v in st_symbols.items() if v},
             "dealer_gamma": _g.get("assets", {}),
-            "menthorq_levels": _g.get("mq", {}),
-            "dow_map": _g.get("ym", {}),
+            "menthorq_levels": {
+                k: {f: v.get(f) for f in
+                    ("call_resistance", "call_resistance_0dte", "put_support",
+                     "put_support_0dte", "hvl", "hvl_0dte", "gamma_wall_0dte",
+                     "min_1d", "max_1d") if v.get(f) is not None}
+                for k, v in (_g.get("mq") or {}).items()},
+            "dow_map": {k: v for k, v in (_g.get("ym") or {}).items() if k != "_detail"},
         })
         # Never claim success unconditionally — the old code printed "Narrative
         # ready" even when generate_ai_narrative() had returned {"_error": ...},
