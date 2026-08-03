@@ -15,7 +15,7 @@ subject to the schedule delay).
 The session is passed EXPLICITLY, never auto-detected, so a late run still
 produces the briefing it was meant to produce.
 
-Usage:  pythonw ICT_briefing_local.py --session london|us|nyopen
+Usage:  pythonw ICT_briefing_local.py --session london|us|nyopen|orb
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def main() -> int:
         i = sys.argv.index("--session") + 1
         if i < len(sys.argv):
             session = sys.argv[i]
-    if session not in ("london", "us", "nyopen"):
+    if session not in ("london", "us", "nyopen", "orb"):
         log(f"FATAL: bad session {session!r}")
         return 2
 

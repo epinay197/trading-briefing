@@ -29,6 +29,7 @@ on:
           - london
           - us
           - nyopen
+          - orb
 
 permissions:
   contents: write    # commit docs/ back to repo

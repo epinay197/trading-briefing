@@ -222,6 +222,13 @@ def _market_phase(now_et=None):
         return ("pre-open", "PRE-OPEN. Nothing has traded in RTH. Overnight acceptance is PROVISIONAL — "
                             "Globex volume is not a grade. The 09:30-09:45 candle is the judge. "
                             "Frame scenarios and triggers; do not declare a trend.")
+    if 580 <= hm < 600:
+        return ("orb", "ORB30 WINDOW (09:55 ET). The first 25 minutes of RTH have printed and "
+                       "the 30-minute opening range is about to complete. Give the MEASURED "
+                       "opening-range high and low, the break levels either side, and the fade "
+                       "case if the range is wide. Say plainly whether the pre-open plan was "
+                       "confirmed or invalidated by the open. This is the trader's first entry "
+                       "of the day - be specific about location, not directional mood.")
     if hm < 600:
         return ("opening", "OPENING DRIVE (09:30-10:00). The tiebreaker candle is printing. "
                            "Call what the first range means, flag gap-and-trap risk, stay provisional.")
@@ -243,7 +250,7 @@ def _market_phase(now_et=None):
 _sidx    = sys.argv.index("--session") + 1 if "--session" in sys.argv else -1
 SESSION  = sys.argv[_sidx] if 0 < _sidx < len(sys.argv) else "us"
 
-_sfx_map    = {"london": "_london", "us": "", "nyopen": "_nyopen"}
+_sfx_map    = {"london": "_london", "us": "", "nyopen": "_nyopen", "orb": "_orb"}
 _sfx        = _sfx_map.get(SESSION, "")
 OUTPUT_FILE = BASE_DIR / f"briefing_{DATE_STR}{_sfx}.html"
 LATEST_FILE = BASE_DIR / f"briefing_latest{_sfx}.html"
@@ -575,6 +582,50 @@ def fetch_menthorq():
 NOKEPA_DIR = Path(r"C:\Users\Anwender\Code\nokepa")
 
 
+def fetch_opening_range():
+    """Measured RTH opening range since 09:30 ET — the ORB briefing's whole point.
+
+    Everything else in this page is positioning built from settled open
+    interest. This is the one block that is pure realised price action, and the
+    ORB entry is taken off it, so it is computed from 1-minute bars rather than
+    inferred from a daily high/low (which would include the overnight session
+    and be useless for an opening-range break).
+    """
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    now = datetime.now(et)
+    open_t = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    if now < open_t:
+        return {"status": "pre-open"}
+
+    out = {"status": "ok", "as_of_et": now.strftime("%H:%M"),
+           "minutes_since_open": int((now - open_t).total_seconds() // 60)}
+    for label, sym in (("ES", "ES=F"), ("NQ", "NQ=F"), ("YM", "YM=F"),
+                       ("SPX", "^GSPC"), ("SPY", "SPY"), ("QQQ", "QQQ")):
+        try:
+            r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}",
+                             params={"range": "1d", "interval": "1m"},
+                             headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()["chart"]["result"][0]
+            ts = r.get("timestamp") or []
+            q = r["indicators"]["quote"][0]
+            hi, lo, last = [], [], None
+            for i, t in enumerate(ts):
+                if datetime.fromtimestamp(t, et) < open_t:
+                    continue
+                h, l, c = q["high"][i], q["low"][i], q["close"][i]
+                if h is not None: hi.append(h)
+                if l is not None: lo.append(l)
+                if c is not None: last = c
+            if hi and lo:
+                out[label] = {"or_high": round(max(hi), 2), "or_low": round(min(lo), 2),
+                              "or_range": round(max(hi) - min(lo), 2),
+                              "last": round(last, 2) if last else None,
+                              "bars": len(hi)}
+        except Exception as e:
+            out[label] = {"err": type(e).__name__}
+    return out
+
+
 def fetch_local_gamma() -> dict:
     """Gamma / GEX / DEX from the user's OWN engines — not from a vendor scrape.
 
@@ -705,12 +756,14 @@ def generate_ai_narrative(payload: dict) -> dict:
         "london": f"Prepare a concise London-open briefing for a US index day trader (instruments: NQ, ES, /MNQ, /MES; London session: 3AM-8AM ET, NY session follows 9:30AM ET; date: {DATE_DISPLAY}). Focus on overnight futures movement, London open momentum, and key levels for the 3:30-8:00 AM ET window.",
         "us": f"Prepare a concise pre-market briefing for a US index day trader (instruments: NQ, ES; pre-market: 7:55 AM ET; regular session: 9:30AM-4:00PM ET; date: {DATE_DISPLAY}).",
         "nyopen": f"Prepare a concise post-bell briefing for a US index day trader (instruments: NQ, ES; NY bell just rung 9:15 AM ET; session: 9:30AM-4:00PM ET; date: {DATE_DISPLAY}). Focus on opening momentum, market structure setup, and confirmed bias for the main session.",
+        "orb": f"Prepare the ORB30 briefing for a US index day trader ({DATE_DISPLAY}, 09:55 ET). The first 25 minutes of RTH have printed and the trader takes their first position around the 30-minute opening range. The `opening_range` block in RAW DATA holds the ACTUAL high, low and last price since 09:30 for each instrument - build everything on those measured numbers, not on the pre-open plan. Grade the pre-open map against what the open actually did, then give the ORB break and fade levels.",
     }.get(SESSION, "")
 
     overnight_spec = {
         "london": "3 sentences on overnight NQ/ES narrative and London open momentum",
         "us": "3 sentences on overnight NQ/ES narrative",
         "nyopen": "3 sentences on opening 15-min action and NY session directional bias confirmation",
+        "orb": "3 sentences: what the first 25 minutes actually did versus the pre-open expectation, whether the opening range is wide or narrow against the implied daily move, and which side is trapped",
     }.get(SESSION, "3 sentences on overnight NQ/ES narrative")
 
     _cover = ("Cover the whole index complex, not just the futures: state the bias, "
@@ -720,6 +773,7 @@ def generate_ai_narrative(payload: dict) -> dict:
         "london": "One bold directional bias for London + early NY. " + _cover,
         "us": "One bold directional bias. " + _cover,
         "nyopen": "Confirmed directional bias post-bell for the session main move. " + _cover,
+        "orb": "Bias for the ORB30 entry, stated as break-above / break-below the MEASURED opening range. " + _cover,
     }.get(SESSION, "One bold directional bias. " + _cover)
 
     # 6000 chars truncated the payload mid-JSON: dow_map sorted last, so its tail
@@ -760,6 +814,12 @@ def generate_ai_narrative(payload: dict) -> dict:
         Note the Dow's real risk: it is 30 names, so ONE high-priced component
         gapping on single-stock news can move it independently of ES/NQ. Call
         that out when the top-weighted names are the story.
+
+        OPENING RANGE - when `opening_range.status` is "ok" it carries the
+        MEASURED high, low and last for each instrument since 09:30 ET. Once RTH
+        has begun those numbers outrank every pre-open projection: quote the real
+        or_high / or_low, and if a pre-open level has already been taken out, say
+        so rather than repeating it as though it still stands.
 
         LEVEL DERIVATION - this is the important part. The RAW DATA carries
         `dealer_gamma` (per-asset net GEX, gamma flip, call wall, put wall from
@@ -1894,8 +1954,10 @@ def notify_ntfy(title, message, url=""):
 # ── GitHub Pages index redirect ────────────────────────────────────────────────
 def create_index_page(briefing_filename):
     """Write session redirect page: london.html, index.html (US), or nyopen.html."""
-    page_names = {"london": "london.html", "us": "index.html", "nyopen": "nyopen.html"}
-    labels     = {"london": "London session", "us": "US pre-market", "nyopen": "NY open session"}
+    page_names = {"london": "london.html", "us": "index.html", "nyopen": "nyopen.html",
+                  "orb": "orb.html"}
+    labels     = {"london": "London session", "us": "US pre-market",
+                  "nyopen": "NY open session", "orb": "ORB30 (09:55 ET)"}
     page_name = page_names.get(SESSION, "index.html")
     label     = labels.get(SESSION, "today's briefing")
     idx = BASE_DIR / page_name
@@ -2078,6 +2140,7 @@ def main():
         threading.Thread(target=_run, args=("st_trending",      fetch_stocktwits_trending)),
         threading.Thread(target=_run, args=("wsb",              fetch_reddit_wsb)),
         threading.Thread(target=_run, args=("gamma",            fetch_local_gamma)),
+        threading.Thread(target=_run, args=("oprange",          fetch_opening_range)),
     ]
     for t in threads: t.start()
     for t in threads: t.join()
@@ -2115,6 +2178,7 @@ def main():
                      "min_1d", "max_1d") if v.get(f) is not None}
                 for k, v in (_g.get("mq") or {}).items()},
             "dow_map": {k: v for k, v in (_g.get("ym") or {}).items() if k != "_detail"},
+            "opening_range": results.get("oprange", {}),
         })
         # Never claim success unconditionally — the old code printed "Narrative
         # ready" even when generate_ai_narrative() had returned {"_error": ...},
