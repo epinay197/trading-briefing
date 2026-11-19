@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trading Briefing — Thursday, November 19, 2026</title>
+<style>
+:root {
+  --bg:       #0d1117;
+  --panel:    #161b22;
+  --border:   #30363d;
+  --text:     #e6edf3;
+  --muted:    #8b949e;
+  --green:    #4ade80;
+  --red:      #f87171;
+  --yellow:   #fbbf24;
+  --blue:     #60a5fa;
+  --purple:   #c084fc;
+  --accent:   #1f6feb;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px; line-height: 1.5;
+}
+.header {
+  background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 18px 32px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100;
+}
+.header-left h1 { font-size: 20px; font-weight: 700; color: var(--blue); letter-spacing: 0.5px; }
+.header-left .subtitle { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.header-right { text-align: right; }
+.session-countdown {
+  font-size: 13px; font-weight: 600;
+  padding: 6px 14px; border-radius: 6px;
+  border: 1px solid var(--accent); color: var(--blue);
+}
+.tag-gen { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.container { max-width: 1680px; margin: 0 auto; padding: 20px 24px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.panel-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 1px;
+  color: var(--muted); text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px; margin-bottom: 12px;
+}
+.panel-title .dot {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; margin-right: 8px; vertical-align: middle;
+}
+table { width: 100%; border-collapse: collapse; }
+th {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.8px;
+  color: var(--muted); text-transform: uppercase;
+  padding: 4px 8px; text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+td { padding: 5px 8px; border-bottom: 1px solid #21262d; font-size: 12px; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(255,255,255,0.03); }
+.up   { color: var(--green); font-weight: 600; }
+.down { color: var(--red);   font-weight: 600; }
+.neutral { color: var(--muted); }
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+}
+.badge-green  { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+.badge-red    { background: rgba(248,113,113,0.15); color: var(--red);   border: 1px solid rgba(248,113,113,0.3); }
+.badge-yellow { background: rgba(251,191,36,0.15);  color: var(--yellow); border: 1px solid rgba(251,191,36,0.3); }
+.badge-blue   { background: rgba(96,165,250,0.15);  color: var(--blue);  border: 1px solid rgba(96,165,250,0.3); }
+.gauge-wrap { display: flex; align-items: center; gap: 14px; margin: 8px 0; }
+.gauge-num  { font-size: 40px; font-weight: 800; }
+.gauge-label { font-size: 12px; color: var(--muted); }
+.gauge-delta { font-size: 11px; margin-top: 2px; }
+.sentiment-bar-wrap { margin: 6px 0; }
+.sbar { height: 8px; border-radius: 4px; overflow: hidden;
+        display: flex; background: #21262d; }
+.sbar-bull    { background: var(--green); }
+.sbar-neutral { background: #6b7280; }
+.sbar-bear    { background: var(--red); }
+.sbar-labels  { display: flex; justify-content: space-between;
+                font-size: 11px; color: var(--muted); margin-top: 3px; }
+.bullet { display: block; padding: 3px 0; }
+.bullet::before { content: "• "; color: var(--blue); }
+.levels-chip {
+  display: inline-block;
+  padding: 3px 10px; border-radius: 4px;
+  font-size: 12px; font-weight: 600; font-family: monospace;
+  margin: 2px;
+}
+.chip-r  { background: rgba(248,113,113,0.12); color: var(--red);   border: 1px solid rgba(248,113,113,0.25); }
+.chip-s  { background: rgba(74,222,128,0.12);  color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+.chip-p  { background: rgba(251,191,36,0.12);  color: var(--yellow); border: 1px solid rgba(251,191,36,0.25); }
+.bias-box {
+  border-left: 4px solid var(--red);
+  background: rgba(248,113,113,0.06);
+  padding: 12px 16px; border-radius: 0 8px 8px 0;
+  font-size: 13px; line-height: 1.7;
+}
+.bias-box.bullish { border-left-color: var(--green); background: rgba(74,222,128,0.06); }
+.bias-box.neutral-b { border-left-color: var(--yellow); background: rgba(251,191,36,0.06); }
+.st-row { border-bottom: 1px solid #21262d; padding: 7px 0; }
+.st-row:last-child { border-bottom: none; }
+.st-user  { color: var(--blue); font-size: 11px; font-weight: 600; }
+.st-body  { color: var(--text); font-size: 12px; margin-top: 2px; }
+.st-meta  { color: var(--muted); font-size: 10px; margin-top: 2px; }
+.wsb-row { padding: 7px 0; border-bottom: 1px solid #21262d; }
+.wsb-row:last-child { border-bottom: none; }
+.wsb-title { color: var(--text); font-size: 12px; }
+.wsb-meta  { color: var(--muted); font-size: 11px; margin-top: 3px; }
+.wsb-flair {
+  display: inline-block; background: rgba(192,132,252,0.15);
+  color: var(--purple); border: 1px solid rgba(192,132,252,0.25);
+  border-radius: 3px; padding: 1px 6px; font-size: 10px; margin-right: 6px;
+}
+.trend-chip {
+  display: inline-block; margin: 3px;
+  padding: 3px 10px; border-radius: 14px;
+  font-size: 11px; font-weight: 600;
+  background: rgba(96,165,250,0.1); color: var(--blue);
+  border: 1px solid rgba(96,165,250,0.2);
+}
+.regime-pill {
+  font-size: 13px; font-weight: 700;
+  padding: 6px 16px; border-radius: 20px;
+  display: inline-block; margin-bottom: 10px;
+}
+.regime-neg  { background: rgba(248,113,113,0.15); color: var(--red);   border: 1px solid rgba(248,113,113,0.3); }
+.regime-pos  { background: rgba(74,222,128,0.15);  color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+.bias-head { font-size:19px; font-weight:700; line-height:1.4; margin-bottom:14px; color:var(--text); }
+.bias-decisive { font-size:12px; color:var(--muted); letter-spacing:.5px; text-transform:uppercase;
+  font-weight:600; padding:10px 14px; background:rgba(255,255,255,0.03); border-radius:8px;
+  border:1px solid var(--border); margin-bottom:14px; }
+.bias-decisive b { color:var(--yellow); font-size:15px; letter-spacing:0; text-transform:none;
+  margin-left:10px; font-weight:700; }
+.bias-split { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+.bias-side { border-radius:8px; padding:14px 16px; font-size:14px; line-height:1.65; }
+.bias-side.up { background:rgba(74,222,128,0.07); border:1px solid rgba(74,222,128,0.28); }
+.bias-side.dn { background:rgba(248,113,113,0.07); border:1px solid rgba(248,113,113,0.28); }
+.bias-side-h { font-size:12px; font-weight:800; letter-spacing:.7px; text-transform:uppercase;
+  margin-bottom:8px; }
+.bias-side.up .bias-side-h { color:var(--green); }
+.bias-side.dn .bias-side-h { color:var(--red); }
+.legs { width:100%; border-collapse:collapse; font-size:13.5px; }
+.legs td { padding:5px 0; vertical-align:top; line-height:1.55; }
+.legs .lg-sym { width:46px; font-weight:800; font-size:11.5px; letter-spacing:.5px;
+  opacity:.85; padding-right:10px; white-space:nowrap; }
+.bias-killbar { background:rgba(248,113,113,0.10); border:1px solid rgba(248,113,113,0.35);
+  border-left:3px solid var(--red); border-radius:8px; padding:12px 16px; font-size:13.5px;
+  line-height:1.6; color:var(--text); }
+.bias-killbar b { color:var(--red); font-size:11px; letter-spacing:.7px; text-transform:uppercase;
+  display:block; margin-bottom:4px; }
+@media (max-width: 900px) { .bias-split { grid-template-columns:1fr; } }
+.oneliner { font-size:15px; background:rgba(96,165,250,0.08); border:1px solid rgba(96,165,250,0.35);
+  border-left:3px solid var(--blue); border-radius:8px; padding:12px 16px; margin-bottom:16px;
+  font-size:13.5px; line-height:1.6; color:var(--text); }
+.oneliner b { color:var(--blue); font-size:10.5px; letter-spacing:.6px; text-transform:uppercase;
+  display:block; margin-bottom:4px; }
+.scn { border:1px solid var(--border); border-radius:8px; padding:12px 14px; background:rgba(255,255,255,0.02); }
+.scn-h { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:8px; }
+.scn-n { font-size:12.5px; font-weight:700; color:var(--text); }
+.scn-p { font-size:15px; font-weight:800; color:var(--blue); white-space:nowrap; }
+.scn-bar { height:3px; background:var(--border); border-radius:2px; margin-bottom:10px; overflow:hidden; }
+.scn-bar i { display:block; height:100%; background:var(--blue); }
+.scn dl { margin:0; font-size:11.5px; line-height:1.55; }
+.scn dt { color:var(--muted); font-size:10px; letter-spacing:.5px; text-transform:uppercase; margin-top:6px; }
+.scn dd { margin:1px 0 0; color:var(--text); }
+.regime-neutral { background: rgba(251,191,36,0.15); color: var(--yellow); border: 1px solid rgba(251,191,36,0.3); }
+.menthorq-placeholder {
+  color: var(--muted); font-size: 12px; font-style: italic;
+  padding: 10px 0; text-align: center;
+}
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.section-divider {
+  height: 1px; background: var(--border);
+  margin: 20px 0;
+}
+@media (max-width: 900px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ────────────────────────────────────────────────────────────── -->
+<div class="header">
+  <div class="header-left">
+    <h1>⚡ DAILY TRADING BRIEFING</h1>
+    <div class="subtitle">NQ · ES · US Index Futures &nbsp;|&nbsp; 8:00 AM – 12:00 PM ET</div>
+  </div>
+  <div class="header-right">
+    <div class="session-countdown">Open in 24m</div>
+    <div class="tag-gen">Thursday, November 19, 2026 &nbsp;|&nbsp; Generated 09:05 AM ET</div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ── Market Status Banner ──────────────────────────────────────────────── -->
+<div style="margin-bottom:12px"><div style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:6px;padding:6px 14px;font-size:12px;color:#fbbf24">CME Futures Open &nbsp;|&nbsp; Thursday — Pre-market (NYSE opens 9:30 AM ET)</div></div>
+
+<div class="oneliner"><b>One-liner &mdash; panic-proof</b>ES 7390 and NQ 27500 are the line: above them buy dips toward 7495/27830, below them sell rallies toward 7345/27369 — and if VIX reclaims 24 while 10Y tags 5.10, flatten regardless of which side you were right about.</div>
+
+<!-- ── ROW A: TRADE PLAN (top of page, full width) ────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#4ade80"></span>Session Bias &mdash; the trade plan</div>
+  <div class="bias-box " style="padding:18px 20px"><div class="bias-head">Gap-up into short gamma — the overnight midpoints decide everything today.</div><div class="bias-decisive">Decisive level<b>ES 7390 | NQ 27500 | YM 50579 | SPX 7295 | SPY 735.80 | QQQ 667.50</b></div><div class="bias-split"><div class="bias-side up"><div class="bias-side-h">&#9650; Above &mdash; long plan</div><table class="legs"><tbody><tr><td class="lg-sym">ES</td><td>Buy 7395-7385 -&gt; 7440, stretch 7495. Stop 7372.</td></tr><tr><td class="lg-sym">NQ</td><td>Buy 27510-27470 -&gt; 27830, stretch 27940. Stop 27410.</td></tr><tr><td class="lg-sym">YM</td><td>Buy 50585-50545 -&gt; 50635, stretch 51147. Stop 50495.</td></tr><tr><td class="lg-sym">SPX</td><td>Buy 7298-7290 -&gt; 7345, stretch 7400. Stop 7277.</td></tr><tr><td class="lg-sym">SPY</td><td>Buy 735.90-735.10 -&gt; 740.80, stretch 747.00. Stop 733.90.</td></tr><tr><td class="lg-sym">QQQ</td><td>Buy 667.70-666.60 -&gt; 675.50, stretch 680.00. Stop 664.80.</td></tr></tbody></table></div><div class="bias-side dn"><div class="bias-side-h">&#9660; Below &mdash; short plan</div><table class="legs"><tbody><tr><td class="lg-sym">ES</td><td>Sell 7385-7395 -&gt; 7345, stretch 7295. Stop 7412.</td></tr><tr><td class="lg-sym">NQ</td><td>Sell 27470-27510 -&gt; 27369, stretch 27169. Stop 27580.</td></tr><tr><td class="lg-sym">YM</td><td>Sell 50575-50615 -&gt; 50499, stretch 50386. Stop 50660.</td></tr><tr><td class="lg-sym">SPX</td><td>Sell 7290-7298 -&gt; 7250, stretch 7200. Stop 7312.</td></tr><tr><td class="lg-sym">SPY</td><td>Sell 735.10-735.90 -&gt; 730.00, stretch 726.20. Stop 737.40.</td></tr><tr><td class="lg-sym">QQQ</td><td>Sell 666.60-667.70 -&gt; 664.30, stretch 659.00. Stop 670.10.</td></tr></tbody></table></div></div><div class="bias-killbar"><b>&#9940; Invalidation &mdash; kill switch</b>Kill all directional risk if VIX reclaims 24.00 or 10Y prints above 5.103% while ES trades back under 7345.</div></div>
+  <div class="grid-2" style="margin-top:16px">
+    <div>
+      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">Tactical framework</div>
+      <div style="font-size:13px;line-height:1.8"><span class="bullet">Let the 09:30-09:45 candle close before sizing. A gap this size into short gamma produces a fake first move roughly half the time.</span><span class="bullet">Trade from the edges only: NQ 27369 / 27830-27940 and ES 7345 / 7495 are the actionable zones. The 27500-27700 and 7390-7440 middles are no-trade.</span><span class="bullet">Two-engine rule: longs through NQ 27830 require VIX under 22.00 AND 10Y under 5.06. Shorts through ES 7345 require VIX over 23.50. One engine alone is rotation, fade it.</span><span class="bullet">ETF pair: QQQ 671.83 sits under the 680 call wall and over the 664-655 put shelf — buy 667.50-664.30 with a 663.80 stop, sell 675.50-680.00 toward 667.50. SPY is cleaner short at the 747-748 call wall and long at the 730 put wall; 735-741 is dead money for 0DTE premium buyers.</span><span class="bullet">Negative GEX means stops must be wider and size must be smaller — halve normal position, keep the same dollar risk.</span></div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">Location discipline &mdash; where to enter, where not to</div>
+      <div style="font-size:13px;line-height:1.7"><p style='margin:4px 0'>The entries ARE at the overnight extremes and the gamma walls: NQ 27369-27169 and 27830-27940, ES 7345 and 7495, QQQ 664.30 and 680.00, SPY 730.00 and 747.00 — places where dealer hedging must react and risk is definable in a handful of points. The entries are NOT in the 27500-27700 NQ / 7390-7460 ES middle, and they are categorically not a market-order chase into the open after a 488-point overnight run; buying the first green RTH print after a 1.8% gap is the worst location math on the board.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── ROW 3a: Scenarios ──────────────────────────────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#c084fc"></span>Scenarios &mdash; weighted, most likely first</div>
+  <div class="grid-3" style="gap:14px"><div class="scn"><div class="scn-h"><span class="scn-n">Gap Fade Into The Put Shelf</span><span class="scn-p">40%</span></div><div class="scn-bar"><i style="width:40%"></i></div><dl><dt>Trigger</dt><dd>09:30-09:45 candle closes under ES 7390 / NQ 27500 with VIX holding above 22.50.</dd><dt>Path</dt><dd>Sellers hit the overnight premium, ES rotates 7345 then probes the 7250-equivalent put wall; NQ unwinds to 27369 and tests 27169 if 10Y holds above 5.08%. Short gamma accelerates each break.</dd><dt>Invalidation</dt><dd>ES reclaims 7412 and holds ten minutes, or VIX breaks under 21.84.</dd></dl></div><div class="scn"><div class="scn-h"><span class="scn-n">Short-Covering Extension To The Call Wall</span><span class="scn-p">35%</span></div><div class="scn-bar"><i style="width:35%"></i></div><dl><dt>Trigger</dt><dd>ES holds 7390 on the first pullback and NQ prints above 27830 with VIX under 22.00 and 10Y under 5.06%.</dd><dt>Path</dt><dd>Dealers chase into negative gamma, NQ runs 27940 and QQQ pins toward 680; ES extends to the 7495 call-wall translation, SPY 747.</dd><dt>Invalidation</dt><dd>NQ fails back under 27700 within thirty minutes of the breakout, or VIX turns up through 23.00.</dd></dl></div><div class="scn"><div class="scn-h"><span class="scn-n">Overnight Range Digestion</span><span class="scn-p">25%</span></div><div class="scn-bar"><i style="width:25%"></i></div><dl><dt>Trigger</dt><dd>Opening fifteen minutes stays inside ES 7385-7440 / NQ 27470-27700 with VIX pinned 22.00-23.00.</dd><dt>Path</dt><dd>Market balances the gap all session between the overnight midpoint and high, no wall tested; 0DTE decay dominates and both edges stay intact into the close.</dd><dt>Invalidation</dt><dd>A fifteen-minute close outside NQ 27369-27830 or ES 7345-7495.</dd></dl></div></div>
+</div>
+
+<!-- ── ROW C: Key Levels + Gamma (wide, side by side) ─────────────────────── -->
+<div class="grid-2" style="margin-bottom:16px">
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#fbbf24"></span>Key Levels &mdash; Index Complex</div>
+    
+    <table>
+      <thead><tr><th>Instrument</th><th>Support 2</th><th>Support 1</th>
+      <th>Pivot</th><th>Resistance 1</th><th>Resistance 2</th></tr></thead>
+      <tbody><tr><td>NQ</td><td><span class="levels-chip chip-s">27,169</span></td><td><span class="levels-chip chip-s">27,369</span></td><td><span class="levels-chip chip-p">27,500</span></td><td><span class="levels-chip chip-r">27,830</span></td><td><span class="levels-chip chip-r">27,940</span></td></tr><tr><td>ES</td><td><span class="levels-chip chip-s">7,295</span></td><td><span class="levels-chip chip-s">7,345</span></td><td><span class="levels-chip chip-p">7,390</span></td><td><span class="levels-chip chip-r">7,440</span></td><td><span class="levels-chip chip-r">7,495</span></td></tr><tr><td>YM</td><td><span class="levels-chip chip-s">50,386</span></td><td><span class="levels-chip chip-s">50,499</span></td><td><span class="levels-chip chip-p">50,579</span></td><td><span class="levels-chip chip-r">50,635</span></td><td><span class="levels-chip chip-r">51,147</span></td></tr><tr><td>SPX</td><td><span class="levels-chip chip-s">7,200</span></td><td><span class="levels-chip chip-s">7,250</span></td><td><span class="levels-chip chip-p">7,295</span></td><td><span class="levels-chip chip-r">7,345</span></td><td><span class="levels-chip chip-r">7,400</span></td></tr><tr><td>NDX</td><td><span class="levels-chip chip-s">26,610</span></td><td><span class="levels-chip chip-s">26,810</span></td><td><span class="levels-chip chip-p">26,940</span></td><td><span class="levels-chip chip-r">27,271</span></td><td><span class="levels-chip chip-r">27,380</span></td></tr><tr><td>SPY</td><td><span class="levels-chip chip-s">726.20</span></td><td><span class="levels-chip chip-s">730.00</span></td><td><span class="levels-chip chip-p">735.80</span></td><td><span class="levels-chip chip-r">740.80</span></td><td><span class="levels-chip chip-r">747.00</span></td></tr><tr><td>QQQ</td><td><span class="levels-chip chip-s">659.00</span></td><td><span class="levels-chip chip-s">664.30</span></td><td><span class="levels-chip chip-p">667.50</span></td><td><span class="levels-chip chip-r">675.50</span></td><td><span class="levels-chip chip-r">680.00</span></td></tr></tbody>
+    </table>
+    <div style="margin-top:10px;font-size:11px;color:#8b949e">
+      <span class="levels-chip chip-r">R</span> Resistance &nbsp;
+      <span class="levels-chip chip-p">P</span> Pivot &nbsp;
+      <span class="levels-chip chip-s">S</span> Support
+      &nbsp;&middot;&nbsp; fixed for the session (built from settled open interest)
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#f87171"></span>Gamma / Options Regime (SPX)</div>
+    
+    <table>
+      <thead><tr><th>Asset</th><th>Net GEX</th><th>0-5d</th><th>Net DEX</th>
+      <th>&gamma;flip</th><th>Call wall</th><th>Put wall</th>
+      <th>MQ CR0</th><th>MQ PS0</th><th>MQ 1-day band</th></tr></thead>
+      <tbody><tr><td>SPX</td><td><span class="down">-0.19B</span></td><td><span class="down">-0.14B</span></td><td><span class="up">+16.05B</span></td><td>7,450</td><td>7,400</td><td>7,250</td><td>7,725</td><td>7,700</td><td>7,618&ndash;7,731</td></tr><tr><td>NDX</td><td><span class="down">-0M</span></td><td><span class="down">-0M</span></td><td><span class="up">+94M</span></td><td>26,310</td><td>27,380</td><td>26,810</td><td>29,600</td><td>29,375</td><td>28,960&ndash;29,659</td></tr><tr><td>SPY</td><td><span class="down">-69M</span></td><td><span class="up">+0.12B</span></td><td><span class="up">+5.85B</span></td><td>718</td><td>748</td><td>730</td><td>772</td><td>765</td><td>760&ndash;772</td></tr><tr><td>QQQ</td><td><span class="down">-0.11B</span></td><td><span class="up">+75M</span></td><td><span class="up">+9.87B</span></td><td>653</td><td>680</td><td>655</td><td>728</td><td>705</td><td>705&ndash;722</td></tr></tbody>
+    </table>
+    <div style="font-size:10.5px;color:#8b949e;margin-top:8px">
+      Source: NOKEPA live (:8780) &middot; MenthorQ levels 2026-08-24 15:58. Net GEX dealer-signed (negative = dealers short
+      gamma, moves amplify); Net DEX dealer-signed.
+    </div>
+    <p style='margin:4px 0'>Dealers are short gamma across the board — SPX net GEX -186.1mm, NDX -204.7k, QQQ -105.8mm, SPY -69.3mm — with SPX spot (7317) sitting below its 7450 flip, so hedging flow amplifies direction instead of damping it. Expect wide, fast legs and poor mean reversion inside the day: the SPX put wall at 7250 (ES ~7345) and the call wall at 7400 (ES ~7495) are the magnets, and the 2.45 SPX put/call ratio plus 3.6% 0DTE skew says downside hedges are still being paid for.</p>
+    <div style="margin-top:12px">
+      <div style="font-size:11px;color:#8b949e;margin-bottom:6px">
+        Gamma and levels sourced from local engines (NOKEPA + MenthorQ via CDP).
+        The legacy menthorq.com WordPress scrape was retired 2026-07-31 &mdash;
+        MenthorQ now lives at dashboard.menthorq.io.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── ROW 3b: Session Playbook ───────────────────────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#60a5fa"></span>Session Playbook &mdash; how to trade the levels above</div>
+  
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div style="font-size:11px;color:#8b949e;margin-bottom:6px">The two layers</div>
+        <div style="font-size:12px;line-height:1.7">
+          <span class="bullet"><b>Map (fixed all day):</b> MenthorQ EOD levels, built from
+          settled open interest at yesterday's close. Open interest cannot change during the
+          session &mdash; these strikes do not move. They tell you <i>where</i> price reacts.</span>
+          <span class="bullet"><b>Weather (moves constantly):</b> live gamma on that same open
+          interest. Gamma reprices with spot, time and IV, so intensity swings hard even though
+          no strike moved. It tells you <i>how</i> price reacts when it gets there.</span>
+          <span class="bullet"><b>Blind spot:</b> today's 0DTE volume creates positioning that
+          does not reach open interest until tomorrow. Your only proxies are the gamma sign and
+          the put/call volume ratio.</span>
+        </div>
+        <div style="font-size:11px;color:#8b949e;margin:14px 0 6px">The one number &mdash; today</div>
+        <div class="regime-pill regime-neg">SPX net GEX -186M</div>
+        <div style="font-size:12.5px;line-height:1.7;margin-top:8px">NEGATIVE GAMMA &rarr; dealers AMPLIFY. Breaks work. Trade <b>through</b> levels, trail the stop. Do not fade.</div>
+        <div style="font-size:11px;color:#8b949e;margin:14px 0 6px">Three rules</div>
+        <div style="font-size:12px;line-height:1.8">
+          <span class="bullet">Never trade against the gamma sign.</span>
+          <span class="bullet">The wall is the target, not the entry. Enter at the pivot, exit at the wall.</span>
+          <span class="bullet">Two losses = done for the session.</span>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:#8b949e;margin-bottom:6px">The day (ET)</div>
+        <table><tbody><tr><td style="white-space:nowrap">9:30&ndash;9:45</td><td>Nothing. Let the range print.</td></tr><tr><td style="white-space:nowrap">9:45&ndash;10:00</td><td>Note which side of the pivot you are on. That is the bias.</td></tr><tr><td style="white-space:nowrap">10:00&ndash;11:30</td><td><b>The only real trading window.</b> Long above pivot toward the call wall; short below toward the put wall. Stop on the far side of the level you entered from.</td></tr><tr><td style="white-space:nowrap">11:30&ndash;13:30</td><td>Flat. Lunch has no edge.</td></tr><tr><td style="white-space:nowrap">13:30&ndash;15:00</td><td>Second leg only if the morning made a clean high or low. If it chopped, stay out.</td></tr><tr><td style="white-space:nowrap">15:00&ndash;15:45</td><td>Pin window. Nearest wall pulls price in. The only tested edge here (PF 1.79).</td></tr><tr><td style="white-space:nowrap">15:45&ndash;16:00</td><td>Flat.</td></tr></tbody></table>
+        <div style="font-size:10.5px;color:#8b949e;margin-top:10px;line-height:1.6">
+          For scalping do not read this page &mdash; put <code>ICT_GammaEdgeLevels</code> on the
+          ES/NQ chart. Same levels, refreshed every 5 minutes, plus SD-band touch probabilities.
+        </div>
+      </div>
+    </div>
+</div>
+
+<!-- ── ROW E: Market Snapshot + Fear/Greed + VIX ──────────────────────────── -->
+<div class="grid-3" style="margin-bottom:16px">
+
+  <div class="panel" style="grid-column: span 2">
+    <div class="panel-title"><span class="dot" style="background:#60a5fa"></span>Market Snapshot</div>
+    
+    <table>
+      <thead><tr>
+        <th>Instrument</th><th>Last</th><th>Chg</th><th>%</th>
+        <th>Session Hi</th><th>Session Lo</th>
+      </tr></thead>
+      <tbody><tr><td style="font-weight:600">NQ Futures</td><td style="font-family:monospace">27,675.50</td><td class="up">▲ 488.75</td><td class="up">+1.80%</td><td style="font-family:monospace;color:#8b949e">27,830.50</td><td style="font-family:monospace;color:#8b949e">27,169.00</td></tr><tr><td style="font-weight:600">ES Futures</td><td style="font-family:monospace">7,412.50</td><td class="up">▲ 72.00</td><td class="up">+0.98%</td><td style="font-family:monospace;color:#8b949e">7,440.50</td><td style="font-family:monospace;color:#8b949e">7,338.25</td></tr><tr><td style="font-weight:600">YM Futures</td><td style="font-family:monospace">50,534</td><td class="up">▲ 261</td><td class="up">+0.52%</td><td style="font-family:monospace;color:#8b949e">50,656</td><td style="font-family:monospace;color:#8b949e">50,258</td></tr><tr><td style="font-weight:600">VIX</td><td style="font-family:monospace">22.65</td><td class="down">▼ 1.91</td><td class="down">-7.78%</td><td style="font-family:monospace;color:#8b949e">22.66</td><td style="font-family:monospace;color:#8b949e">21.84</td></tr><tr><td style="font-weight:600">WTI Crude</td><td style="font-family:monospace">83.40</td><td class="up">▲ 1.09</td><td class="up">+1.32%</td><td style="font-family:monospace;color:#8b949e">83.74</td><td style="font-family:monospace;color:#8b949e">81.66</td></tr><tr><td style="font-weight:600">Gold</td><td style="font-family:monospace">3,713.8</td><td class="down">▼ 28.1</td><td class="down">-0.75%</td><td style="font-family:monospace;color:#8b949e">3,759.5</td><td style="font-family:monospace;color:#8b949e">3,694.5</td></tr><tr><td style="font-weight:600">DXY</td><td style="font-family:monospace">103.681</td><td class="down">▼ 0.182</td><td class="down">-0.18%</td><td style="font-family:monospace;color:#8b949e">103.974</td><td style="font-family:monospace;color:#8b949e">103.588</td></tr><tr><td style="font-weight:600">10Y Yield</td><td style="font-family:monospace">5.078</td><td class="up">▲ 0.012</td><td class="up">+0.24%</td><td style="font-family:monospace;color:#8b949e">5.103</td><td style="font-family:monospace;color:#8b949e">5.078</td></tr><tr><td style="font-weight:600">EUR/USD</td><td style="font-family:monospace">1.1005</td><td class="up">▲ 0.0027</td><td class="up">+0.25%</td><td style="font-family:monospace;color:#8b949e">1.1013</td><td style="font-family:monospace;color:#8b949e">1.0959</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#fbbf24"></span>Sentiment Gauges</div>
+    <div class="gauge-wrap">
+      <div>
+        <div class="gauge-num" style="color:#f87171">10</div>
+        <div class="gauge-label">Crypto Fear &amp; Greed</div>
+        <div style="font-size:9px;color:#8b949e;margin-top:2px">alternative.me &mdash; crypto, not equity</div>
+        <div class="gauge-delta" style="color:#f87171">Extreme Fear</div>
+        <div class="gauge-delta neutral">▼ 1 pts vs yesterday (Extreme Fear)</div>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <div style="font-size:11px;color:#8b949e;margin-bottom:4px">VIX LEVEL</div>
+      <div style="font-size:28px;font-weight:800;color:#f87171">22.65</div>
+      <div class="down" style="font-size:12px">▼ -7.78%</div>
+      <div style="font-size:11px;color:#8b949e;margin-top:6px">
+        Below 25 — contained volatility
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <div style="font-size:11px;color:#8b949e;margin-bottom:4px">Gamma Regime</div>
+      <span class="regime-pill regime-neutral">NEGATIVE GAMMA — vol amplifying (SPX net GEX -186M)</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── ROW 2: Macro + Overnight ──────────────────────────────────────────── -->
+<div class="grid-2" style="margin-bottom:16px">
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#c084fc"></span>Macro & Geopolitical</div>
+    <span class="bullet">Risk reversed hard overnight: NQ +1.80% (+488.75) and ES +0.98% lead a tech-led squeeze off the 27169 / 7338.25 Globex lows, with YM lagging at +0.52% — a narrow, mega-cap bid, not broad participation.</span><span class="bullet">VIX collapsed 7.8% to 22.65 but is still above 20, so this is fear being unwound, not fear being gone; a 22-handle VIX into a gap-up open historically delivers two-way range, not a one-way drift.</span><span class="bullet">Rates remain the governor: 10Y at 5.078% (+1.2bp, overnight high 5.103%) with DXY soft at 103.681 and EUR/USD 1.1005 — dollar down but yields up is a stagflationary mix that caps multiple expansion in long-duration tech.</span><span class="bullet">Commodities disagree with the equity bid: WTI +1.32% to 83.40 while gold sells off 0.75% to 3713.8 — energy cost pressure plus a liquidation bid out of metals argues the rally is positioning-driven, not growth-driven.</span>
+    <div style="margin-top:12px">
+      <div class="panel-title" style="margin-bottom:8px">Risk Events Today</div>
+      <span class="bullet">Weekly jobless claims and any 8:30 data already in the tape — watch the revision-driven follow-through in the first thirty minutes.</span><span class="bullet">10Y yield at 5.078%: a push back through the 5.103% overnight high kills the duration bid and the NQ gap with it.</span><span class="bullet">VIX 22.65 — a reclaim of 24 (yesterday&#x27;s 24.56 close) is the risk-off trigger; sub-21.84 (overnight low) is the all-clear.</span><span class="bullet">WTI 83.40 pressing the 83.74 overnight high — an energy breakout re-ignites the inflation narrative and pressures rate-sensitive tech.</span><span class="bullet">Single-name Dow risk: YM is 30 price-weighted names; one high-priced component headline can decouple YM from ES/NQ regardless of index flow.</span><span class="bullet">Note: the MenthorQ level set in today&#x27;s feed (SPX 7700s, NDX 29000s) is inconsistent with live spot and is being disregarded — all levels below derive from the dealer gamma map and measured overnight structure.</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#4ade80"></span>Overnight Price Action — NQ / ES</div>
+    <p style='margin:4px 0'>Nothing has traded in RTH yet — the overnight tape is a 661-point NQ range (27169 to 27830.5) that closed near the upper third at 27675.5, which is provisional acceptance built on thin Globex volume and must be re-priced by real size at 09:30. The tell in the first fifteen minutes is whether NQ can hold above the 27500 overnight midpoint and ES above 7390 on the opening drive; holding those with VIX pressing under 22.50 confirms the squeeze has cash sponsorship. If the 09:30-09:45 candle closes back under those midpoints after tagging the overnight high area, treat the gap as a liquidity event to be sold rather than a trend to be joined.</p>
+    <div class="section-divider"></div>
+    <div class="panel-title" style="margin-bottom:8px">CTA / Systematic Flow</div>
+    <p style='margin:4px 0'>Trend models were short/reduced into yesterday&#x27;s close with SPX in TREND_DOWN character, so an overnight +1.8% NQ pop is primarily short-covering and gamma chase, not fresh systematic length. Real CTA re-engagement on the long side needs daily closes back above the NQ 27830-27940 shelf and ES 7495; below ES 7345 the same models re-add shorts into weakness.</p>
+  </div>
+
+</div>
+
+<!-- ── ROW D2: Sentiment read ─────────────────────────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#8b949e"></span>Sentiment read</div>
+  <div style="font-size:13px;line-height:1.7"><p style='margin:4px 0'>CNN Fear &amp; Greed at 10 (Extreme Fear, prior 11) against a 1.8% NQ gap is the classic disconnect — retail is maximally defensive exactly as price squeezes, which is fuel for continuation but also why the first failed push gets sold violently. Institutional positioning via the 2.45 SPX put/call skew says the desk is hedged, not long, so rallies into the call wall are supply until proven otherwise.</p></div>
+</div>
+
+<!-- ── ROW 4: Retail Sentiment ────────────────────────────────────────────── -->
+<div class="grid-2" style="margin-bottom:16px">
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#60a5fa"></span>StockTwits — Bull/Bear Sentiment</div>
+    <div class="neutral">No data</div>
+    <div class="section-divider"></div>
+    <div class="panel-title" style="margin-bottom:8px">Trending on StockTwits Now</div>
+    <div><span class="trend-chip" title="425,635 watching">BABA</span><span class="trend-chip" title="35,298 watching">CAPR</span><span class="trend-chip" title="139,487 watching">WMT</span><span class="trend-chip" title="26,379 watching">TTWO</span><span class="trend-chip" title="40,844 watching">PANW</span><span class="trend-chip" title="66,586 watching">BIDU</span><span class="trend-chip" title="22,861 watching">PDD</span><span class="trend-chip" title="21,228 watching">P</span><span class="trend-chip" title="8,996 watching">KWEB</span><span class="trend-chip" title="7,251 watching">UVIX</span><span class="trend-chip" title="56,066 watching">UNH</span><span class="trend-chip" title="191,217 watching">SHIB.X</span></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#c084fc"></span>WallStreetBets — Hot Posts</div>
+    <div class="neutral">No posts fetched</div>
+  </div>
+
+</div>
+
+<!-- ── ROW 5: Top StockTwits Messages ─────────────────────────────────────── -->
+<div class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><span class="dot" style="background:#60a5fa"></span>StockTwits — Top Messages (Most Liked)</div>
+  <div class="grid-3">
+    <div><div class="neutral">No messages fetched</div></div>
+    <div><div class="neutral">No messages fetched</div></div>
+    <div><div class="neutral">No messages fetched</div></div>
+  </div>
+</div>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────────── -->
+<div style="text-align:center;color:#30363d;font-size:11px;padding:20px 0 32px">
+  Generated 09:05 AM ET &nbsp;|&nbsp;
+  Sources: Yahoo Finance · Alternative.me · StockTwits · Reddit WSB · MenthorQ · Anthropic Claude &nbsp;|&nbsp;
+  Not financial advice.
+</div>
+
+</div><!-- /container -->
+<!--ICT_SCLINK--><script>window.ICT_SCLINK=Object.assign({"bareFutures": true, "skip": ["BONDS", "BRENT", "CRYPTO", "DJI", "DJX", "DXY", "ENERGY", "ETFS", "FX", "GRAINS", "INDICES", "METALS", "NDX", "RATES", "SOFTS", "STOCKS", "TNX", "VVIX", "XSP"], "selectors": [], "headers": null},window.ICT_SCLINK||{});
+/* ICT_SCLink.js - makes every symbol on a report page a link to the Sierra Chart review chartbook.
+   Inlined into pages by sclink_inject.py. Finds symbols in:
+     1. any element with data-sc="TICKER"            (explicit, always wins)
+     2. table columns whose header is Symbol / Ticker / Sym / Underlying / Asset / Instrument / Root /
+        Contract / Market / Stock / Name (plural ok)   (automatic)
+     3. elements with class "sc-sym"
+   The link carries the page's own ticker (AAPL, /NQ, NQ1!, SPX ...); ICT_SCLink.py maps it to the SC symbol.
+   Re-runs when the page redraws itself (live dashboards). Display only. */
+(function () {
+  if (window.__ictScLink) return; window.__ictScLink = 1;
+  var CFG = Object.assign({ bareFutures: false, maxLen: 12 }, window.ICT_SCLINK || {});
+  var HDR = CFG.headers ? new RegExp(CFG.headers, 'i')       // page-specific: only these column headers
+          : /^(symbol|sym|ticker|underlying|asset|instrument|root|contract|market|stock|etf|name|future|underlier)s?\b/i;
+  var TOK = /^([A-Z0-9]{1,4}[FGHJKMNQUVXZ]\d{1,2}_FUT_[A-Z]+|[A-Z]{1,6}-NQTV|[\/@$^]?[A-Za-z][A-Za-z0-9]{0,5}(?:[.\-][A-Za-z])?(?:1!|=F)?)/;
+  var SKIP = { TOTAL: 1, ALL: 1, SUM: 1, CASH: 1, NONE: 1, NA: 1, AVG: 1, MEAN: 1, OTHER: 1, OTHERS: 1 };
+  (CFG.skip || []).forEach(function (s) { SKIP[String(s).toUpperCase()] = 1; });
+  var css = document.createElement('style');
+  css.textContent = 'a.ict-scl{color:inherit;text-decoration:none;border-bottom:1px dotted currentColor;cursor:pointer}' +
+                    'a.ict-scl:hover{color:#7cc4ff;border-bottom-color:#7cc4ff}';
+  (document.head || document.documentElement).appendChild(css);
+
+  function href(t) { return 'ictsc://open?sym=' + encodeURIComponent(t) + (CFG.bareFutures ? '&fut=1' : ''); }
+  function mk(t, label) {
+    var a = document.createElement('a');
+    a.className = 'ict-scl'; a.href = href(t); a.title = 'Open ' + t + ' in Sierra Chart'; a.textContent = label;
+    a.addEventListener('click', function (e) { e.stopPropagation(); });
+    return a;
+  }
+  function token(text) {
+    var s = (text || '').replace(/^\s+/, '');
+    var m = s.match(TOK);
+    if (!m) return null;
+    var t = m[1];
+    var nxt = s.charAt(t.length);
+    if (nxt && /[A-Za-z0-9]/.test(nxt)) return null;                // part of a longer word
+    if (t.length > CFG.maxLen || SKIP[t.toUpperCase()]) return null;
+    if (/[a-z]/.test(t) && t !== t.toUpperCase() && !/^[\/@$^]/.test(t)) return null;   // "Apple", "Total"
+    return t;
+  }
+  function wrapFirst(el, t) {
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null), n;
+    while ((n = w.nextNode())) {
+      var i = n.nodeValue.indexOf(t);
+      if (i < 0) continue;
+      var after = n.splitText(i); after.splitText(t.length);
+      after.parentNode.replaceChild(mk(t.toUpperCase(), t), after);
+      return true;
+    }
+    return false;
+  }
+  function doCell(el) {
+    if (el.dataset.scl || el.querySelector('a')) { el.dataset.scl = 1; return; }
+    el.dataset.scl = 1;
+    var t = token(el.textContent);
+    if (t) wrapFirst(el, t);
+  }
+  function scan() {
+    document.querySelectorAll('[data-sc]:not([data-scl])').forEach(function (el) {
+      el.dataset.scl = 1;
+      if (el.closest('a')) return;
+      if (el.tagName === 'A') { el.href = href(el.dataset.sc); el.classList.add('ict-scl'); return; }
+      var a = mk(el.dataset.sc, ''); while (el.firstChild) a.appendChild(el.firstChild); el.appendChild(a);
+    });
+    document.querySelectorAll(['.sc-sym'].concat(CFG.selectors || []).map(function (s) { return s + ':not([data-scl])'; }).join(','))
+      .forEach(doCell);
+    document.querySelectorAll('table').forEach(function (tb) {
+      var head = tb.tHead && tb.tHead.rows.length ? tb.tHead.rows[tb.tHead.rows.length - 1] : tb.rows[0];
+      if (!head) return;
+      var cols = [], x = 0;
+      Array.prototype.forEach.call(head.cells, function (c) {
+        if (HDR.test((c.textContent || '').trim())) cols.push(x);
+        x += c.colSpan || 1;
+      });
+      if (!cols.length) return;
+      Array.prototype.forEach.call(tb.rows, function (r) {
+        if (r === head || (r.parentNode && r.parentNode.tagName === 'THEAD')) return;
+        var x = 0;
+        Array.prototype.forEach.call(r.cells, function (c) {
+          if (cols.indexOf(x) >= 0 && c.tagName === 'TD' && (c.colSpan || 1) === 1) doCell(c);   // colspan = group heading
+          x += c.colSpan || 1;
+        });
+      });
+    });
+  }
+  var timer = null;
+  function later() { if (!timer) timer = setTimeout(function () { timer = null; scan(); }, 250); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scan); else scan();
+  new MutationObserver(later).observe(document.documentElement, { childList: true, subtree: true });
+})();
+</script></body>
+</html>
